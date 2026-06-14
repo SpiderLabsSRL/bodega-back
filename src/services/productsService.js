@@ -1,0 +1,635 @@
+// src/services/productsService.js
+const { query, pool } = require("../../db");
+
+const productsService = {
+  // Obtener opciones de selección
+  getUbicaciones: async () => {
+    const result = await query(
+      "SELECT * FROM ubicaciones WHERE estado = 0 ORDER BY nombre",
+    );
+    return result.rows;
+  },
+
+  getCategorias: async () => {
+    const result = await query(
+      "SELECT * FROM categorias WHERE estado = 0 ORDER BY nombre",
+    );
+    return result.rows;
+  },
+
+  // Obtener solo id y nombre para selects
+  getTodosProductosSelect: async () => {
+    const result = await query(`
+      SELECT idproducto, nombre 
+      FROM productos 
+      WHERE estado = 0 
+      ORDER BY nombre
+    `);
+    return result.rows;
+  },
+
+  getTodosProductos: async () => {
+    const result = await query(`
+      SELECT 
+        p.idproducto,
+        p.nombre,
+        p.descripcion,
+        p.idubicacion,
+        u.nombre as ubicacion_nombre,
+        p.estado,
+        p.imagen,
+        p.precio_venta,
+        p.precio_compra,
+        p.stock,
+        p.stock_minimo,
+        p.codigo_barras,
+        ARRAY_AGG(DISTINCT c.nombre) as categorias
+      FROM productos p
+      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
+      LEFT JOIN producto_categorias pc ON p.idproducto = pc.idproducto
+      LEFT JOIN categorias c ON pc.idcategoria = c.idcategoria
+      WHERE p.estado = 0
+      GROUP BY p.idproducto, u.nombre, u.idubicacion
+      ORDER BY p.nombre
+    `);
+
+    const productos = await Promise.all(
+      result.rows.map(async (producto) => {
+        let imagenBase64 = "";
+        if (producto.imagen) {
+          try {
+            const base64 = producto.imagen.toString("base64");
+            imagenBase64 = `data:image/jpeg;base64,${base64}`;
+          } catch (error) {
+            console.error(
+              `Error al convertir imagen del producto ${producto.idproducto}:`,
+              error,
+            );
+            imagenBase64 = "";
+          }
+        }
+
+        // Obtener productos similares (con relaciones transitivas)
+        const similaresResult = await query(
+          `
+          WITH RECURSIVE similar_products AS (
+            -- Relaciones directas
+            SELECT DISTINCT 
+              CASE 
+                WHEN idproducto = $1::integer THEN idproducto_similar
+                WHEN idproducto_similar = $1::integer THEN idproducto
+              END as idproducto_relacionado
+            FROM productos_similares
+            WHERE idproducto = $1::integer OR idproducto_similar = $1::integer
+            
+            UNION
+            
+            -- Relaciones transitivas
+            SELECT DISTINCT
+              CASE 
+                WHEN ps.idproducto = sp.idproducto_relacionado THEN ps.idproducto_similar
+                WHEN ps.idproducto_similar = sp.idproducto_relacionado THEN ps.idproducto
+              END
+            FROM productos_similares ps
+            INNER JOIN similar_products sp ON 
+              ps.idproducto = sp.idproducto_relacionado OR 
+              ps.idproducto_similar = sp.idproducto_relacionado
+          )
+          SELECT DISTINCT p.idproducto, p.nombre
+          FROM similar_products sp
+          JOIN productos p ON sp.idproducto_relacionado = p.idproducto
+          WHERE p.estado = 0 AND p.idproducto != $1::integer
+          ORDER BY p.nombre
+        `,
+          [producto.idproducto],
+        );
+
+        return {
+          idproducto: producto.idproducto,
+          nombre: producto.nombre,
+          descripcion: producto.descripcion,
+          idubicacion: producto.idubicacion,
+          ubicacion_nombre: producto.ubicacion_nombre,
+          ubicacion: producto.ubicacion_nombre,
+          categorias: producto.categorias?.filter((c) => c !== null) || [],
+          estado: producto.estado,
+          imagen: imagenBase64,
+          precio_venta: producto.precio_venta,
+          precio_compra: producto.precio_compra,
+          stock: producto.stock,
+          stock_minimo: producto.stock_minimo,
+          codigo_barras: producto.codigo_barras,
+          productos_similares: similaresResult.rows,
+        };
+      }),
+    );
+
+    return productos;
+  },
+
+  buscarProductos: async (termino) => {
+    const result = await query(
+      `
+      SELECT 
+        p.*,
+        u.nombre as ubicacion_nombre,
+        u.idubicacion,
+        ARRAY_AGG(DISTINCT c.nombre) as categorias,
+        ARRAY_AGG(DISTINCT tp.nombre) as tipos
+      FROM productos p
+      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
+      LEFT JOIN producto_categorias pc ON p.idproducto = pc.idproducto
+      LEFT JOIN categorias c ON pc.idcategoria = c.idcategoria
+      LEFT JOIN producto_tipos pt ON p.idproducto = pt.idproducto
+      LEFT JOIN tipos tp ON pt.idtipo = tp.idtipo
+      WHERE p.estado = 0 
+        AND (p.nombre ILIKE $1 OR p.descripcion ILIKE $1 
+             OR c.nombre ILIKE $1 OR tp.nombre ILIKE $1
+             OR p.codigo_barras ILIKE $1)
+      GROUP BY p.idproducto, u.nombre, u.idubicacion
+      ORDER BY p.nombre
+    `,
+      [`%${termino}%`],
+    );
+
+    const productos = await Promise.all(
+      result.rows.map(async (producto) => {
+        let imagenBase64 = "";
+        if (producto.imagen) {
+          try {
+            const base64 = producto.imagen.toString("base64");
+            imagenBase64 = `data:image/jpeg;base64,${base64}`;
+          } catch (error) {
+            console.error(
+              `Error al convertir imagen del producto ${producto.idproducto}:`,
+              error,
+            );
+            imagenBase64 = "";
+          }
+        }
+
+        // Obtener productos similares (con relaciones transitivas)
+        const similaresResult = await query(
+          `
+          WITH RECURSIVE similar_products AS (
+            -- Relaciones directas
+            SELECT DISTINCT 
+              CASE 
+                WHEN idproducto = $1::integer THEN idproducto_similar
+                WHEN idproducto_similar = $1::integer THEN idproducto
+              END as idproducto_relacionado
+            FROM productos_similares
+            WHERE idproducto = $1::integer OR idproducto_similar = $1::integer
+            
+            UNION
+            
+            -- Relaciones transitivas
+            SELECT DISTINCT
+              CASE 
+                WHEN ps.idproducto = sp.idproducto_relacionado THEN ps.idproducto_similar
+                WHEN ps.idproducto_similar = sp.idproducto_relacionado THEN ps.idproducto
+              END
+            FROM productos_similares ps
+            INNER JOIN similar_products sp ON 
+              ps.idproducto = sp.idproducto_relacionado OR 
+              ps.idproducto_similar = sp.idproducto_relacionado
+          )
+          SELECT DISTINCT p.idproducto, p.nombre
+          FROM similar_products sp
+          JOIN productos p ON sp.idproducto_relacionado = p.idproducto
+          WHERE p.estado = 0 AND p.idproducto != $1::integer
+          ORDER BY p.nombre
+        `,
+          [producto.idproducto],
+        );
+
+        return {
+          idproducto: producto.idproducto,
+          nombre: producto.nombre,
+          descripcion: producto.descripcion,
+          idubicacion: producto.idubicacion,
+          ubicacion_nombre: producto.ubicacion_nombre,
+          ubicacion: producto.ubicacion_nombre,
+          categorias: producto.categorias?.filter((c) => c !== null) || [],
+          estado: producto.estado,
+          imagen: imagenBase64,
+          precio_venta: producto.precio_venta,
+          precio_compra: producto.precio_compra,
+          stock: producto.stock,
+          stock_minimo: producto.stock_minimo,
+          codigo_barras: producto.codigo_barras,
+          productos_similares: similaresResult.rows,
+        };
+      }),
+    );
+
+    return productos;
+  },
+
+  getProductoById: async (id) => {
+    const result = await query(
+      `
+      SELECT 
+        p.*,
+        u.nombre as ubicacion_nombre,
+        u.idubicacion,
+        ARRAY_AGG(DISTINCT c.nombre) as categorias,
+        ARRAY_AGG(DISTINCT tp.nombre) as tipos
+      FROM productos p
+      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
+      LEFT JOIN producto_categorias pc ON p.idproducto = pc.idproducto
+      LEFT JOIN categorias c ON pc.idcategoria = c.idcategoria
+      LEFT JOIN producto_tipos pt ON p.idproducto = pt.idproducto
+      LEFT JOIN tipos tp ON pt.idtipo = tp.idtipo
+      WHERE p.idproducto = $1 AND p.estado = 0
+      GROUP BY p.idproducto, u.nombre, u.idubicacion
+    `,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("Producto no encontrado");
+    }
+
+    const producto = result.rows[0];
+
+    let imagenBase64 = "";
+    if (producto.imagen) {
+      try {
+        const base64 = producto.imagen.toString("base64");
+        imagenBase64 = `data:image/jpeg;base64,${base64}`;
+      } catch (error) {
+        console.error(
+          `Error al convertir imagen del producto ${producto.idproducto}:`,
+          error,
+        );
+        imagenBase64 = "";
+      }
+    }
+
+    // Obtener productos similares (con relaciones transitivas)
+    const similaresResult = await query(
+      `
+      WITH RECURSIVE similar_products AS (
+        -- Relaciones directas
+        SELECT DISTINCT 
+          CASE 
+            WHEN idproducto = $1::integer THEN idproducto_similar
+            WHEN idproducto_similar = $1::integer THEN idproducto
+          END as idproducto_relacionado
+        FROM productos_similares
+        WHERE idproducto = $1::integer OR idproducto_similar = $1::integer
+        
+        UNION
+        
+        -- Relaciones transitivas
+        SELECT DISTINCT
+          CASE 
+            WHEN ps.idproducto = sp.idproducto_relacionado THEN ps.idproducto_similar
+            WHEN ps.idproducto_similar = sp.idproducto_relacionado THEN ps.idproducto
+          END
+        FROM productos_similares ps
+        INNER JOIN similar_products sp ON 
+          ps.idproducto = sp.idproducto_relacionado OR 
+          ps.idproducto_similar = sp.idproducto_relacionado
+      )
+      SELECT DISTINCT p.idproducto, p.nombre
+      FROM similar_products sp
+      JOIN productos p ON sp.idproducto_relacionado = p.idproducto
+      WHERE p.estado = 0 AND p.idproducto != $1::integer
+      ORDER BY p.nombre
+    `,
+      [id],
+    );
+
+    const productoProcesado = {
+      idproducto: producto.idproducto,
+      nombre: producto.nombre,
+      descripcion: producto.descripcion,
+      idubicacion: producto.idubicacion,
+      ubicacion_nombre: producto.ubicacion_nombre,
+      ubicacion: producto.ubicacion_nombre,
+      categorias: producto.categorias?.filter((c) => c !== null) || [],
+      estado: producto.estado,
+      imagen: imagenBase64,
+      precio_venta: producto.precio_venta,
+      precio_compra: producto.precio_compra,
+      stock: producto.stock,
+      stock_minimo: producto.stock_minimo,
+      codigo_barras: producto.codigo_barras,
+      productos_similares: similaresResult.rows,
+    };
+
+    return productoProcesado;
+  },
+
+  // Función para crear relaciones transitivas completas
+  crearRelacionesTransitivas: async (client, productoIds) => {
+    if (!productoIds || productoIds.length < 2) return;
+
+    // Eliminar duplicados y asegurar que sean números
+    const idsUnicos = [...new Set(productoIds.map((id) => parseInt(id)))];
+
+    console.log(
+      `Creando relaciones transitivas para los IDs: ${idsUnicos.join(", ")}`,
+    );
+
+    // Crear todas las combinaciones posibles entre los productos (grafo completo)
+    for (let i = 0; i < idsUnicos.length; i++) {
+      for (let j = i + 1; j < idsUnicos.length; j++) {
+        const id1 = idsUnicos[i];
+        const id2 = idsUnicos[j];
+
+        if (id1 !== id2) {
+          // Verificar si la relación ya existe
+          const existe = await client.query(
+            "SELECT 1 FROM productos_similares WHERE (idproducto = $1 AND idproducto_similar = $2) OR (idproducto = $2 AND idproducto_similar = $1)",
+            [id1, id2],
+          );
+
+          if (existe.rows.length === 0) {
+            // Insertar relación bidireccional
+            await client.query(
+              "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
+              [id1, id2],
+            );
+            console.log(`Relación creada entre ${id1} y ${id2}`);
+          } else {
+            console.log(`Relación ya existente entre ${id1} y ${id2}`);
+          }
+        }
+      }
+    }
+  },
+
+  // Función para obtener todos los productos relacionados en un grupo
+  obtenerGrupoCompleto: async (client, productoId) => {
+    const id = parseInt(productoId);
+
+    // Obtener todas las relaciones donde participe este producto
+    const result = await client.query(
+      `
+      SELECT DISTINCT idproducto, idproducto_similar
+      FROM productos_similares
+      WHERE idproducto = $1 OR idproducto_similar = $1
+      `,
+      [id],
+    );
+
+    // Recopilar todos los IDs únicos del grupo
+    const idsRelacionados = new Set();
+    idsRelacionados.add(id);
+
+    for (const row of result.rows) {
+      idsRelacionados.add(row.idproducto);
+      idsRelacionados.add(row.idproducto_similar);
+    }
+
+    // Para cada nuevo ID, buscar más relaciones (profundidad)
+    let hayCambios = true;
+    while (hayCambios) {
+      hayCambios = false;
+      const idsActuales = Array.from(idsRelacionados);
+
+      for (const idActual of idsActuales) {
+        const nuevasRelaciones = await client.query(
+          `
+          SELECT DISTINCT idproducto, idproducto_similar
+          FROM productos_similares
+          WHERE idproducto = $1 OR idproducto_similar = $1
+          `,
+          [idActual],
+        );
+
+        for (const row of nuevasRelaciones.rows) {
+          if (!idsRelacionados.has(row.idproducto)) {
+            idsRelacionados.add(row.idproducto);
+            hayCambios = true;
+          }
+          if (!idsRelacionados.has(row.idproducto_similar)) {
+            idsRelacionados.add(row.idproducto_similar);
+            hayCambios = true;
+          }
+        }
+      }
+    }
+
+    // Remover el producto original del resultado
+    const resultado = Array.from(idsRelacionados).filter(
+      (idItem) => idItem !== id,
+    );
+    console.log(`Grupo completo para producto ${id}: ${resultado.join(", ")}`);
+
+    return resultado;
+  },
+
+  createProducto: async (productoData, imagenFile) => {
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      let imagenBuffer = null;
+      if (imagenFile) {
+        if (imagenFile.buffer) {
+          imagenBuffer = imagenFile.buffer;
+        } else if (imagenFile.data) {
+          imagenBuffer = Buffer.from(imagenFile.data);
+        } else {
+          imagenBuffer = Buffer.from(imagenFile);
+        }
+      }
+
+      const productoResult = await client.query(
+        `INSERT INTO productos (
+          nombre, descripcion, idubicacion, imagen, 
+          precio_compra, precio_venta, stock, stock_minimo, codigo_barras, estado
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0) RETURNING *`,
+        [
+          productoData.nombre,
+          productoData.descripcion,
+          productoData.idubicacion,
+          imagenBuffer,
+          productoData.precio_compra,
+          productoData.precio_venta,
+          productoData.stock,
+          productoData.stock_minimo || 0,
+          productoData.codigo_barras || null,
+        ],
+      );
+
+      const producto = productoResult.rows[0];
+
+      if (productoData.categorias && productoData.categorias.length > 0) {
+        for (const idcategoria of productoData.categorias) {
+          await client.query(
+            "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
+            [producto.idproducto, idcategoria],
+          );
+        }
+      }
+
+      // Crear relaciones transitivas completas
+      if (
+        productoData.productos_similares &&
+        productoData.productos_similares.length > 0
+      ) {
+        const todosIds = [
+          producto.idproducto,
+          ...productoData.productos_similares,
+        ];
+        await productsService.crearRelacionesTransitivas(client, todosIds);
+      }
+
+      await client.query("COMMIT");
+
+      return await productsService.getProductoById(producto.idproducto);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  updateProducto: async (id, productoData, imagenFile) => {
+    const client = await pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // Verificar que el producto existe
+      const productoExistente = await client.query(
+        "SELECT * FROM productos WHERE idproducto = $1 AND estado = 0",
+        [id],
+      );
+
+      if (productoExistente.rows.length === 0) {
+        throw new Error("Producto no encontrado");
+      }
+
+      let imagenBuffer = null;
+      if (imagenFile) {
+        if (imagenFile.buffer) {
+          imagenBuffer = imagenFile.buffer;
+        } else if (imagenFile.data) {
+          imagenBuffer = Buffer.from(imagenFile.data);
+        } else {
+          imagenBuffer = Buffer.from(imagenFile);
+        }
+      }
+
+      // Construir la consulta de actualización
+      let updateQuery = `
+        UPDATE productos SET 
+          nombre = $1, 
+          descripcion = $2, 
+          idubicacion = $3,
+          precio_compra = $4, 
+          precio_venta = $5, 
+          stock = $6,
+          stock_minimo = $7,
+          codigo_barras = $8
+      `;
+
+      const queryParams = [
+        productoData.nombre,
+        productoData.descripcion,
+        productoData.idubicacion,
+        productoData.precio_compra,
+        productoData.precio_venta,
+        productoData.stock,
+        productoData.stock_minimo || 0,
+        productoData.codigo_barras || null,
+      ];
+
+      if (imagenBuffer) {
+        updateQuery += `, imagen = $9 WHERE idproducto = $10`;
+        queryParams.push(imagenBuffer, id);
+      } else {
+        updateQuery += ` WHERE idproducto = $9`;
+        queryParams.push(id);
+      }
+
+      await client.query(updateQuery, queryParams);
+
+      // Actualizar categorías (eliminar existentes y insertar nuevas)
+      await client.query(
+        "DELETE FROM producto_categorias WHERE idproducto = $1",
+        [id],
+      );
+      if (productoData.categorias && productoData.categorias.length > 0) {
+        for (const idcategoria of productoData.categorias) {
+          await client.query(
+            "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
+            [id, idcategoria],
+          );
+        }
+      }
+
+      // Obtener el grupo completo de productos relacionados actualmente
+      const grupoActual = await productsService.obtenerGrupoCompleto(
+        client,
+        id,
+      );
+      const todosIdsActuales = [id, ...grupoActual];
+
+      // Eliminar todas las relaciones existentes del grupo completo
+      for (const productoId of todosIdsActuales) {
+        await client.query(
+          "DELETE FROM productos_similares WHERE idproducto = $1 OR idproducto_similar = $1",
+          [productoId],
+        );
+      }
+
+      console.log(
+        `Eliminadas relaciones para el grupo: ${todosIdsActuales.join(", ")}`,
+      );
+
+      // Crear nuevas relaciones con los productos similares seleccionados
+      if (
+        productoData.productos_similares &&
+        productoData.productos_similares.length > 0
+      ) {
+        const nuevosIds = [id, ...productoData.productos_similares];
+        await productsService.crearRelacionesTransitivas(client, nuevosIds);
+      }
+
+      await client.query("COMMIT");
+
+      return await productsService.getProductoById(id);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  },
+
+  deleteProducto: async (id) => {
+    // Soft delete - marcar como eliminado
+    const result = await query(
+      "UPDATE productos SET estado = 1 WHERE idproducto = $1",
+      [id],
+    );
+
+    if (result.rowCount === 0) {
+      throw new Error("Producto no encontrado");
+    }
+  },
+
+  updateStockProducto: async (idproducto, cantidad) => {
+    const result = await query(
+      "UPDATE productos SET stock = stock + $1 WHERE idproducto = $2 AND estado = 0 RETURNING *",
+      [cantidad, idproducto],
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("Producto no encontrada");
+    }
+
+    return result.rows[0];
+  },
+};
+
+module.exports = productsService;
