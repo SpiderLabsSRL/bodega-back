@@ -272,58 +272,130 @@ const BodegaService = {
 
       const bodegaId = idbodega || 1;
 
-      // Insertar en productos (SIN stock, SIN idbodega)
-      const productoResult = await client.query(
-        `INSERT INTO productos (
-          nombre, descripcion, idubicacion, imagen, precio_venta, 
-          precio_compra, codigo_barras, estado
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
-        RETURNING idproducto`,
-        [
-          nombre,
-          descripcion || "",
-          idubicacion || 1,
-          imagenBuffer,
-          precio_venta || 0,
-          precio_compra || 0,
-          codigo_barras || null,
-        ]
-      );
+      let codigoBarrasFinal = codigo_barras && codigo_barras.trim() !== "" 
+        ? codigo_barras.trim() 
+        : null;
 
-      const idproducto = productoResult.rows[0].idproducto;
-
-      // Insertar en producto_bodega (AQUÍ va el stock)
-      await client.query(
-        `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
-         VALUES ($1, $2, $3, $4)`,
-        [idproducto, bodegaId, stock || 0, stock_minimo || 0]
-      );
-
-      if (categorias && Array.isArray(categorias) && categorias.length > 0) {
-        for (const categoria of categorias) {
-          const idCategoria = typeof categoria === 'string' ? parseInt(categoria) : categoria;
-          if (!isNaN(idCategoria)) {
-            await client.query(
-              "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
-              [idproducto, idCategoria]
+      if (codigoBarrasFinal) {
+        const existingByCode = await client.query(
+          `SELECT idproducto FROM productos WHERE codigo_barras = $1 AND estado = 0`,
+          [codigoBarrasFinal]
+        );
+        
+        if (existingByCode.rows.length > 0) {
+          const baseCode = codigoBarrasFinal;
+          let counter = 1;
+          let newCode = baseCode;
+          
+          while (true) {
+            const checkResult = await client.query(
+              `SELECT idproducto FROM productos WHERE codigo_barras = $1 AND estado = 0`,
+              [newCode]
             );
+            if (checkResult.rows.length === 0) break;
+            newCode = `${baseCode}-${counter}`;
+            counter++;
           }
+          codigoBarrasFinal = newCode;
         }
       }
 
-      if (productos_similares && Array.isArray(productos_similares) && productos_similares.length > 0) {
-        for (const idSimilar of productos_similares) {
-          const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
-          if (!isNaN(idSimilarNum) && idSimilarNum !== idproducto) {
-            const existe = await client.query(
-              "SELECT 1 FROM productos_similares WHERE (idproducto = $1 AND idproducto_similar = $2) OR (idproducto = $2 AND idproducto_similar = $1)",
-              [idproducto, idSimilarNum]
-            );
-            if (existe.rows.length === 0) {
+      let existingProduct = null;
+      if (!codigoBarrasFinal) {
+        const existingResult = await client.query(
+          `SELECT idproducto FROM productos WHERE nombre = $1 AND estado = 0`,
+          [nombre]
+        );
+        if (existingResult.rows.length > 0) {
+          existingProduct = existingResult.rows[0];
+        }
+      }
+
+      let idproducto;
+
+      if (existingProduct) {
+        idproducto = existingProduct.idproducto;
+        
+        const existingInBodega = await client.query(
+          `SELECT idproducto_bodega FROM producto_bodega 
+           WHERE idproducto = $1 AND idbodega = $2`,
+          [idproducto, bodegaId]
+        );
+
+        if (existingInBodega.rows.length > 0) {
+          await client.query(
+            `UPDATE producto_bodega 
+             SET stock = stock + $1, stock_minimo = $2
+             WHERE idproducto = $3 AND idbodega = $4`,
+            [stock || 0, stock_minimo || 0, idproducto, bodegaId]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
+             VALUES ($1, $2, $3, $4)`,
+            [idproducto, bodegaId, stock || 0, stock_minimo || 0]
+          );
+        }
+      } else {
+        const productoResult = await client.query(
+          `INSERT INTO productos (
+            nombre, descripcion, idubicacion, imagen, precio_venta, 
+            precio_compra, codigo_barras, estado
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
+          RETURNING idproducto`,
+          [
+            nombre,
+            descripcion || "",
+            idubicacion || 1,
+            imagenBuffer,
+            precio_venta || 0,
+            precio_compra || 0,
+            codigoBarrasFinal,
+          ]
+        );
+
+        idproducto = productoResult.rows[0].idproducto;
+
+        if (!codigoBarrasFinal) {
+          const autoCode = `COD-${idproducto}`;
+          await client.query(
+            `UPDATE productos SET codigo_barras = $1 WHERE idproducto = $2`,
+            [autoCode, idproducto]
+          );
+        }
+
+        await client.query(
+          `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
+           VALUES ($1, $2, $3, $4)`,
+          [idproducto, bodegaId, stock || 0, stock_minimo || 0]
+        );
+
+        if (categorias && Array.isArray(categorias) && categorias.length > 0) {
+          for (const categoria of categorias) {
+            const idCategoria = typeof categoria === 'string' ? parseInt(categoria) : categoria;
+            if (!isNaN(idCategoria)) {
               await client.query(
-                "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
+                "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
+                [idproducto, idCategoria]
+              );
+            }
+          }
+        }
+
+        if (productos_similares && Array.isArray(productos_similares) && productos_similares.length > 0) {
+          for (const idSimilar of productos_similares) {
+            const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
+            if (!isNaN(idSimilarNum) && idSimilarNum !== idproducto) {
+              const existe = await client.query(
+                "SELECT 1 FROM productos_similares WHERE (idproducto = $1 AND idproducto_similar = $2) OR (idproducto = $2 AND idproducto_similar = $1)",
                 [idproducto, idSimilarNum]
               );
+              if (existe.rows.length === 0) {
+                await client.query(
+                  "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
+                  [idproducto, idSimilarNum]
+                );
+              }
             }
           }
         }
@@ -354,6 +426,18 @@ const BodegaService = {
         throw new Error("Producto no encontrado");
       }
 
+      const productoActual = await client.query(
+        `SELECT nombre, descripcion, idubicacion, precio_venta, precio_compra, codigo_barras, imagen 
+         FROM productos WHERE idproducto = $1`,
+        [id]
+      );
+
+      if (productoActual.rows.length === 0) {
+        throw new Error("Producto no encontrado");
+      }
+
+      const actual = productoActual.rows[0];
+
       let imagenBuffer = null;
       if (imagenFile) {
         if (imagenFile.buffer) {
@@ -377,7 +461,22 @@ const BodegaService = {
         productos_similares,
       } = productoData;
 
-      // Actualizar productos (SIN stock, SIN idbodega)
+      let codigoBarrasFinal = actual.codigo_barras;
+      
+      if (codigo_barras !== undefined && codigo_barras !== null) {
+        if (codigo_barras.trim() !== "") {
+          codigoBarrasFinal = codigo_barras.trim();
+        } else {
+          codigoBarrasFinal = actual.codigo_barras || null;
+        }
+      }
+
+      const finalNombre = nombre || actual.nombre;
+      const finalDescripcion = descripcion !== undefined && descripcion !== null ? descripcion : actual.descripcion;
+      const finalIdUbicacion = idubicacion || actual.idubicacion;
+      const finalPrecioVenta = precio_venta !== undefined && precio_venta !== null ? precio_venta : parseFloat(actual.precio_venta);
+      const finalPrecioCompra = precio_compra !== undefined && precio_compra !== null ? precio_compra : parseFloat(actual.precio_compra);
+
       let updateQuery = `
         UPDATE productos SET 
           nombre = $1, 
@@ -388,12 +487,12 @@ const BodegaService = {
           codigo_barras = $6
       `;
       const queryParams = [
-        nombre,
-        descripcion || "",
-        idubicacion || 1,
-        precio_venta || 0,
-        precio_compra || 0,
-        codigo_barras || null,
+        finalNombre,
+        finalDescripcion || "",
+        finalIdUbicacion || 1,
+        finalPrecioVenta || 0,
+        finalPrecioCompra || 0,
+        codigoBarrasFinal,
       ];
 
       if (imagenBuffer) {
@@ -406,46 +505,66 @@ const BodegaService = {
 
       await client.query(updateQuery, queryParams);
 
-      // Actualizar stock en producto_bodega si se proporciona idbodega
-      if (idbodega && stock !== undefined) {
-        await client.query(
-          `UPDATE producto_bodega 
-           SET stock = $1, stock_minimo = $2
-           WHERE idproducto = $3 AND idbodega = $4`,
-          [stock, stock_minimo || 0, id, idbodega]
+      if (idbodega && stock !== undefined && stock !== null) {
+        const existingInBodega = await client.query(
+          `SELECT idproducto_bodega FROM producto_bodega 
+           WHERE idproducto = $1 AND idbodega = $2`,
+          [id, idbodega]
         );
+
+        const stockFinal = typeof stock === 'number' ? stock : parseInt(stock) || 0;
+        const stockMinimoFinal = typeof stock_minimo === 'number' ? stock_minimo : parseInt(stock_minimo) || 0;
+
+        if (existingInBodega.rows.length > 0) {
+          await client.query(
+            `UPDATE producto_bodega 
+             SET stock = $1, stock_minimo = $2
+             WHERE idproducto = $3 AND idbodega = $4`,
+            [stockFinal, stockMinimoFinal, id, idbodega]
+          );
+        } else {
+          await client.query(
+            `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
+             VALUES ($1, $2, $3, $4)`,
+            [id, idbodega, stockFinal, stockMinimoFinal]
+          );
+        }
       }
 
-      await client.query(
-        "DELETE FROM producto_categorias WHERE idproducto = $1",
-        [id]
-      );
-      
-      if (categorias && Array.isArray(categorias) && categorias.length > 0) {
-        for (const categoria of categorias) {
-          const idCategoria = typeof categoria === 'string' ? parseInt(categoria) : categoria;
-          if (!isNaN(idCategoria)) {
-            await client.query(
-              "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
-              [id, idCategoria]
-            );
+      if (categorias && Array.isArray(categorias)) {
+        await client.query(
+          "DELETE FROM producto_categorias WHERE idproducto = $1",
+          [id]
+        );
+        
+        if (categorias.length > 0) {
+          for (const categoria of categorias) {
+            const idCategoria = typeof categoria === 'string' ? parseInt(categoria) : categoria;
+            if (!isNaN(idCategoria) && idCategoria > 0) {
+              await client.query(
+                "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
+                [id, idCategoria]
+              );
+            }
           }
         }
       }
 
-      await client.query(
-        "DELETE FROM productos_similares WHERE idproducto = $1 OR idproducto_similar = $1",
-        [id]
-      );
-      
-      if (productos_similares && Array.isArray(productos_similares) && productos_similares.length > 0) {
-        for (const idSimilar of productos_similares) {
-          const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
-          if (!isNaN(idSimilarNum) && idSimilarNum !== id) {
-            await client.query(
-              "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
-              [id, idSimilarNum]
-            );
+      if (productos_similares && Array.isArray(productos_similares)) {
+        await client.query(
+          "DELETE FROM productos_similares WHERE idproducto = $1 OR idproducto_similar = $1",
+          [id]
+        );
+        
+        if (productos_similares.length > 0) {
+          for (const idSimilar of productos_similares) {
+            const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
+            if (!isNaN(idSimilarNum) && idSimilarNum > 0 && idSimilarNum !== id) {
+              await client.query(
+                "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
+                [id, idSimilarNum]
+              );
+            }
           }
         }
       }
@@ -560,52 +679,6 @@ const BodegaService = {
     } finally {
       client.release();
     }
-  },
-
-  getMovimientos: async (idbodega = null, limit = null) => {
-    let queryText = `
-      SELECT 
-        tc.idtransaccion as id,
-        p.idproducto as producto_id,
-        p.nombre as producto_nombre,
-        CASE 
-          WHEN tc.tipo_movimiento IN ('Ingreso', 'Apertura') THEN 'entrada'
-          WHEN tc.tipo_movimiento IN ('Egreso', 'Cierre') THEN 'salida'
-          ELSE 'entrada'
-        END as tipo,
-        CASE 
-          WHEN tc.tipo_movimiento IN ('Ingreso', 'Apertura') THEN tc.monto
-          ELSE ABS(tc.monto)
-        END as cantidad,
-        tc.descripcion as destino,
-        tc.fecha,
-        u.nombres || ' ' || u.apellidos as usuario
-      FROM transacciones_caja tc
-      LEFT JOIN productos p ON p.idproducto = (
-        SELECT idproducto 
-        FROM productos 
-        WHERE nombre ILIKE '%' || SUBSTRING(tc.descripcion FROM '([^:]+)') || '%'
-        LIMIT 1
-      )
-      LEFT JOIN usuarios u ON tc.idusuario = u.idusuario
-      WHERE tc.tipo_movimiento IN ('Ingreso', 'Egreso')
-    `;
-
-    const params = [];
-    if (idbodega) {
-      queryText += ` AND tc.idbodega = $1`;
-      params.push(idbodega);
-    }
-
-    queryText += ` ORDER BY tc.fecha DESC`;
-
-    if (limit) {
-      queryText += ` LIMIT $${params.length + 1}`;
-      params.push(parseInt(limit));
-    }
-
-    const result = await query(queryText, params);
-    return result.rows;
   },
 
   getUbicaciones: async () => {

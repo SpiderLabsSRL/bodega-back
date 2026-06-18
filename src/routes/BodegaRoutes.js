@@ -34,7 +34,6 @@ const upload = multer({
 router.get("/activas", BodegaController.getBodegasActivas);
 router.get("/productos/todos", BodegaController.getAllProductos);
 router.get("/buscar", BodegaController.buscarProductos);
-router.get("/movimientos", BodegaController.getMovimientos);
 
 // Crear una nueva bodega (sucursal)
 router.post("/", BodegaController.createBodega);

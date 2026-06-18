@@ -176,7 +176,6 @@ const BodegaController = {
         }
       }
 
-      // Asegurar que idbodega sea 1 si no se proporciona
       const idbodega = req.body.idbodega ? parseInt(req.body.idbodega) : 1;
 
       const productoData = {
@@ -192,8 +191,6 @@ const BodegaController = {
         idbodega: idbodega,
         productos_similares: productosSimilares,
       };
-
-      console.log("Datos recibidos para crear producto:", productoData);
 
       let imagenFile = null;
       if (req.file) {
@@ -305,17 +302,6 @@ const BodegaController = {
       res.json(result);
     } catch (error) {
       console.error("Error en transferirProducto:", error);
-      res.status(500).json({ error: error.message });
-    }
-  },
-
-  getMovimientos: async (req, res) => {
-    try {
-      const { idbodega, limit } = req.query;
-      const movimientos = await BodegaService.getMovimientos(idbodega, limit);
-      res.json(movimientos);
-    } catch (error) {
-      console.error("Error en getMovimientos:", error);
       res.status(500).json({ error: error.message });
     }
   },
