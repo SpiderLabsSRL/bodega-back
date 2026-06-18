@@ -12,7 +12,7 @@ const getUsuarios = async (req, res) => {
 
 const createUsuario = async (req, res) => {
   try {
-    const { nombres, apellidos, telefono, usuario, contraseña, rol } = req.body;
+    const { nombres, apellidos, telefono, usuario, contraseña, rol, idbodega } = req.body;
     
     // Validaciones básicas
     if (!nombres || !apellidos || !telefono || !usuario || !rol) {
@@ -27,6 +27,10 @@ const createUsuario = async (req, res) => {
       return res.status(400).json({ error: "El teléfono debe tener 8 dígitos" });
     }
 
+    if (!idbodega) {
+      return res.status(400).json({ error: "La bodega es obligatoria" });
+    }
+
     const nuevoUsuario = await usersService.createUsuario({
       nombres,
       apellidos,
@@ -34,6 +38,7 @@ const createUsuario = async (req, res) => {
       usuario,
       contraseña,
       rol,
+      idbodega,
     });
 
     res.status(201).json(nuevoUsuario);
@@ -46,7 +51,7 @@ const createUsuario = async (req, res) => {
 const updateUsuario = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombres, apellidos, telefono, usuario, contraseña, rol } = req.body;
+    const { nombres, apellidos, telefono, usuario, contraseña, rol, idbodega } = req.body;
 
     if (!nombres || !apellidos || !telefono || !usuario || !rol) {
       return res.status(400).json({ error: "Todos los campos son obligatorios" });
@@ -56,6 +61,10 @@ const updateUsuario = async (req, res) => {
       return res.status(400).json({ error: "El teléfono debe tener 8 dígitos" });
     }
 
+    if (!idbodega) {
+      return res.status(400).json({ error: "La bodega es obligatoria" });
+    }
+
     const usuarioActualizado = await usersService.updateUsuario(parseInt(id), {
       nombres,
       apellidos,
@@ -63,6 +72,7 @@ const updateUsuario = async (req, res) => {
       usuario,
       contraseña,
       rol,
+      idbodega,
     });
 
     res.json(usuarioActualizado);
