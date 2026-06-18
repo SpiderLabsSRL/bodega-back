@@ -96,7 +96,18 @@ const BodegaService = {
          pb.stock,
          pb.stock_minimo,
          pb.idbodega,
-         b.nombre as bodega_nombre
+         b.nombre as bodega_nombre,
+         COALESCE(
+           (SELECT json_agg(
+             json_build_object(
+               'idproducto_similar', ps.idproducto_similar,
+               'nombre', p2.nombre
+             )
+           ) FROM productos_similares ps
+           JOIN productos p2 ON ps.idproducto_similar = p2.idproducto
+           WHERE ps.idproducto = p.idproducto AND p2.estado = 0),
+           '[]'
+         ) as productos_similares
        FROM productos p
        LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
        LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto AND pb.idbodega = $1
@@ -140,7 +151,18 @@ const BodegaService = {
            LEFT JOIN bodegas b ON pb.idbodega = b.idbodega
            WHERE pb.idproducto = p.idproducto),
            '[]'
-         ) as bodegas_stock
+         ) as bodegas_stock,
+         COALESCE(
+           (SELECT json_agg(
+             json_build_object(
+               'idproducto_similar', ps.idproducto_similar,
+               'nombre', p2.nombre
+             )
+           ) FROM productos_similares ps
+           JOIN productos p2 ON ps.idproducto_similar = p2.idproducto
+           WHERE ps.idproducto = p.idproducto AND p2.estado = 0),
+           '[]'
+         ) as productos_similares
        FROM productos p
        LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
        WHERE p.estado = 0
@@ -172,7 +194,18 @@ const BodegaService = {
         pb.stock,
         pb.stock_minimo,
         pb.idbodega,
-        b.nombre as bodega_nombre
+        b.nombre as bodega_nombre,
+        COALESCE(
+          (SELECT json_agg(
+            json_build_object(
+              'idproducto_similar', ps.idproducto_similar,
+              'nombre', p2.nombre
+            )
+          ) FROM productos_similares ps
+          JOIN productos p2 ON ps.idproducto_similar = p2.idproducto
+          WHERE ps.idproducto = p.idproducto AND p2.estado = 0),
+          '[]'
+        ) as productos_similares
       FROM productos p
       LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
       LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto
@@ -232,7 +265,18 @@ const BodegaService = {
            LEFT JOIN bodegas b ON pb.idbodega = b.idbodega
            WHERE pb.idproducto = p.idproducto),
            '[]'
-         ) as bodegas_stock
+         ) as bodegas_stock,
+         COALESCE(
+           (SELECT json_agg(
+             json_build_object(
+               'idproducto_similar', ps.idproducto_similar,
+               'nombre', p2.nombre
+             )
+           ) FROM productos_similares ps
+           JOIN productos p2 ON ps.idproducto_similar = p2.idproducto
+           WHERE ps.idproducto = p.idproducto AND p2.estado = 0),
+           '[]'
+         ) as productos_similares
        FROM productos p
        LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
        WHERE p.idproducto = $1 AND p.estado = 0`,
@@ -382,17 +426,21 @@ const BodegaService = {
           }
         }
 
+        // Insertar productos similares
         if (productos_similares && Array.isArray(productos_similares) && productos_similares.length > 0) {
           for (const idSimilar of productos_similares) {
             const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
-            if (!isNaN(idSimilarNum) && idSimilarNum !== idproducto) {
+            if (!isNaN(idSimilarNum) && idSimilarNum > 0 && idSimilarNum !== idproducto) {
               const existe = await client.query(
-                "SELECT 1 FROM productos_similares WHERE (idproducto = $1 AND idproducto_similar = $2) OR (idproducto = $2 AND idproducto_similar = $1)",
+                `SELECT 1 FROM productos_similares 
+                 WHERE (idproducto = $1 AND idproducto_similar = $2) 
+                 OR (idproducto = $2 AND idproducto_similar = $1)`,
                 [idproducto, idSimilarNum]
               );
               if (existe.rows.length === 0) {
                 await client.query(
-                  "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
+                  `INSERT INTO productos_similares (idproducto, idproducto_similar) 
+                   VALUES ($1, $2), ($2, $1)`,
                   [idproducto, idSimilarNum]
                 );
               }
@@ -550,7 +598,9 @@ const BodegaService = {
         }
       }
 
+      // Actualizar productos similares
       if (productos_similares && Array.isArray(productos_similares)) {
+        // Eliminar relaciones existentes
         await client.query(
           "DELETE FROM productos_similares WHERE idproducto = $1 OR idproducto_similar = $1",
           [id]
@@ -561,7 +611,8 @@ const BodegaService = {
             const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
             if (!isNaN(idSimilarNum) && idSimilarNum > 0 && idSimilarNum !== id) {
               await client.query(
-                "INSERT INTO productos_similares (idproducto, idproducto_similar) VALUES ($1, $2), ($2, $1)",
+                `INSERT INTO productos_similares (idproducto, idproducto_similar) 
+                 VALUES ($1, $2), ($2, $1)`,
                 [id, idSimilarNum]
               );
             }
