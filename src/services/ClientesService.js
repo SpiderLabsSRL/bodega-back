@@ -1,9 +1,8 @@
-// ClientesService.js
 const { query } = require("../../db");
 
 const getClientes = async () => {
   const result = await query(
-    "SELECT idcliente, nombres, apellidos, carnet, celular, nota, estado FROM clientes WHERE estado IN (0, 1) ORDER BY idcliente"
+    "SELECT idcliente, nombres, apellidos, carnet, celular, nota, estado FROM clientes WHERE estado = 0 ORDER BY idcliente"
   );
   return result.rows;
 };
@@ -13,7 +12,7 @@ const createCliente = async (clienteData) => {
 
   // Verificar si el carnet ya existe
   const carnetExistente = await query(
-    "SELECT idcliente FROM clientes WHERE carnet = $1 AND estado IN (0, 1)",
+    "SELECT idcliente FROM clientes WHERE carnet = $1 AND estado = 0",
     [carnet]
   );
 
@@ -34,9 +33,9 @@ const createCliente = async (clienteData) => {
 const updateCliente = async (id, clienteData) => {
   const { nombres, apellidos, carnet, celular, nota } = clienteData;
 
-  // Verificar si el cliente existe
+  // Verificar si el cliente existe y está activo
   const clienteExistente = await query(
-    "SELECT idcliente FROM clientes WHERE idcliente = $1 AND estado IN (0, 1)",
+    "SELECT idcliente FROM clientes WHERE idcliente = $1 AND estado = 0",
     [id]
   );
 
@@ -44,9 +43,9 @@ const updateCliente = async (id, clienteData) => {
     throw new Error("Cliente no encontrado");
   }
 
-  // Verificar si el carnet ya existe en otro cliente
+  // Verificar si el carnet ya existe en otro cliente activo
   const carnetDuplicado = await query(
-    "SELECT idcliente FROM clientes WHERE carnet = $1 AND idcliente != $2 AND estado IN (0, 1)",
+    "SELECT idcliente FROM clientes WHERE carnet = $1 AND idcliente != $2 AND estado = 0",
     [carnet, id]
   );
 
@@ -57,16 +56,20 @@ const updateCliente = async (id, clienteData) => {
   const result = await query(
     `UPDATE clientes 
      SET nombres = $1, apellidos = $2, carnet = $3, celular = $4, nota = $5 
-     WHERE idcliente = $6 
+     WHERE idcliente = $6 AND estado = 0
      RETURNING idcliente, nombres, apellidos, carnet, celular, nota, estado`,
     [nombres, apellidos, carnet, celular, nota, id]
   );
+
+  if (result.rows.length === 0) {
+    throw new Error("Cliente no encontrado");
+  }
 
   return result.rows[0];
 };
 
 const deleteCliente = async (id) => {
-  // Cambiar estado a 1 (inactivo) en lugar de borrar físicamente
+  // Cambiar estado a 1 (inactivo)
   const result = await query(
     "UPDATE clientes SET estado = 1 WHERE idcliente = $1 AND estado = 0 RETURNING idcliente",
     [id]
@@ -81,7 +84,7 @@ const toggleClienteStatus = async (id) => {
   const result = await query(
     `UPDATE clientes 
      SET estado = CASE WHEN estado = 0 THEN 1 ELSE 0 END 
-     WHERE idcliente = $1 AND estado IN (0, 1)
+     WHERE idcliente = $1
      RETURNING idcliente, nombres, apellidos, carnet, celular, nota, estado`,
     [id]
   );
