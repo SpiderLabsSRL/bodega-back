@@ -23,6 +23,7 @@ const cajaRoutes = require('./src/routes/cajaRoutes');
 const cashRoutes = require("./src/routes/cashRoutes");
 const pagosRoutes = require('./src/routes/pagosRoutes');
 const ecommerceRoutes = require('./src/routes/ecommerceRoutes');
+const clientesRoutes = require('./src/routes/ClientesRoutes');
 
 // Lista de orígenes permitidos
 const allowedOrigins = [
@@ -82,6 +83,7 @@ app.use("/api", cajaRoutes);
 app.use("/api", cashRoutes);
 app.use('/api', pagosRoutes);
 app.use('/api', ecommerceRoutes);
+app.use('/api/clientes', clientesRoutes);
 
 // Manejador de errores global
 app.use((err, req, res, next) => {
