@@ -176,6 +176,9 @@ const BodegaController = {
         }
       }
 
+      // Asegurar que idbodega sea 1 si no se proporciona
+      const idbodega = req.body.idbodega ? parseInt(req.body.idbodega) : 1;
+
       const productoData = {
         nombre: req.body.nombre,
         descripcion: req.body.descripcion || "",
@@ -186,11 +189,11 @@ const BodegaController = {
         stock: parseInt(req.body.stock) || 0,
         stock_minimo: parseInt(req.body.stock_minimo) || 0,
         codigo_barras: req.body.codigo_barras || null,
-        idbodega: req.body.idbodega ? parseInt(req.body.idbodega) : 1,
+        idbodega: idbodega,
         productos_similares: productosSimilares,
       };
 
-      console.log("Datos recibidos:", productoData);
+      console.log("Datos recibidos para crear producto:", productoData);
 
       let imagenFile = null;
       if (req.file) {

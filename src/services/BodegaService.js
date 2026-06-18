@@ -272,6 +272,7 @@ const BodegaService = {
 
       const bodegaId = idbodega || 1;
 
+      // Insertar en productos (SIN stock, SIN idbodega)
       const productoResult = await client.query(
         `INSERT INTO productos (
           nombre, descripcion, idubicacion, imagen, precio_venta, 
@@ -291,6 +292,7 @@ const BodegaService = {
 
       const idproducto = productoResult.rows[0].idproducto;
 
+      // Insertar en producto_bodega (AQUÍ va el stock)
       await client.query(
         `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
          VALUES ($1, $2, $3, $4)`,
@@ -375,6 +377,7 @@ const BodegaService = {
         productos_similares,
       } = productoData;
 
+      // Actualizar productos (SIN stock, SIN idbodega)
       let updateQuery = `
         UPDATE productos SET 
           nombre = $1, 
@@ -403,6 +406,7 @@ const BodegaService = {
 
       await client.query(updateQuery, queryParams);
 
+      // Actualizar stock en producto_bodega si se proporciona idbodega
       if (idbodega && stock !== undefined) {
         await client.query(
           `UPDATE producto_bodega 
@@ -570,7 +574,7 @@ const BodegaService = {
           ELSE 'entrada'
         END as tipo,
         CASE 
-          WHEN tc.tipo_movimiento IN ('Ingreso', 'Apertura') THEN 0
+          WHEN tc.tipo_movimiento IN ('Ingreso', 'Apertura') THEN tc.monto
           ELSE ABS(tc.monto)
         END as cantidad,
         tc.descripcion as destino,
