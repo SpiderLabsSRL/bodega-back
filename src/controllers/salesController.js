@@ -15,13 +15,22 @@ const searchProducts = async (req, res) => {
   }
 };
 
-const getCashStatus = async (req, res) => {
+const searchClientes = async (req, res) => {
   try {
-    const { bodega } = req.query;
-    const cashStatus = await salesService.getCurrentCashStatus(bodega);
-    res.json(cashStatus);
+    const { q } = req.query;
+    
+    console.log("Buscando clientes con termino:", q);
+    
+    if (!q || q.trim().length < 2) {
+      console.log("Termino de búsqueda demasiado corto");
+      return res.json([]);
+    }
+
+    const clientes = await salesService.searchClientes(q);
+    console.log("Clientes encontrados:", clientes.length);
+    res.json(clientes);
   } catch (error) {
-    console.error("Error in getCashStatus:", error);
+    console.error("Error in searchClientes:", error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -47,6 +56,6 @@ const processSale = async (req, res) => {
 
 module.exports = {
   searchProducts,
-  getCashStatus,
+  searchClientes,
   processSale,
 };

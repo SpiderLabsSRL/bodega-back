@@ -4,7 +4,7 @@ const salesController = require("../controllers/salesController");
 
 // Rutas de ventas
 router.get("/sales/products/search", salesController.searchProducts);
-router.get("/sales/cash-status", salesController.getCashStatus);
 router.post("/sales/process", salesController.processSale);
+router.get("/sales/clientes/search", salesController.searchClientes);
 
 module.exports = router;
