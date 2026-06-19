@@ -2,10 +2,11 @@
 const productsService = require("../services/productsService");
 
 const productsController = {
-  // Obtener opciones de selección
+  // Obtener opciones de selección - FILTRADO POR BODEGA
   getUbicaciones: async (req, res) => {
     try {
-      const ubicaciones = await productsService.getUbicaciones();
+      const { bodega } = req.query;
+      const ubicaciones = await productsService.getUbicaciones(bodega);
       res.json(ubicaciones);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -21,24 +22,25 @@ const productsController = {
     }
   },
 
-  // Obtener solo id y nombre para selects
+  // Obtener solo id y nombre para selects - FILTRADO POR BODEGA
   getTodosProductosSelect: async (req, res) => {
     try {
-      const productos = await productsService.getTodosProductosSelect();
+      const { bodega } = req.query;
+      const productos = await productsService.getTodosProductosSelect(bodega);
       res.json(productos);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   },
 
-  // CRUD de productos - MODIFICADO para búsqueda
+  // CRUD de productos - MODIFICADO para búsqueda con filtro de bodega
   getProductos: async (req, res) => {
     try {
-      const { termino } = req.query;
+      const { termino, bodega } = req.query;
       let productos;
 
       if (termino && termino.trim().length >= 2) {
-        productos = await productsService.buscarProductos(termino);
+        productos = await productsService.buscarProductos(termino, bodega);
       } else {
         productos = [];
       }
@@ -49,25 +51,26 @@ const productsController = {
     }
   },
 
-  // Obtener todos los productos
+  // Obtener todos los productos - FILTRADO POR BODEGA
   getTodosProductos: async (req, res) => {
     try {
-      const productos = await productsService.getTodosProductos();
+      const { bodega } = req.query;
+      const productos = await productsService.getTodosProductos(bodega);
       res.json(productos);
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
   },
 
-  // Búsqueda específica
+  // Búsqueda específica - FILTRADO POR BODEGA
   buscarProductos: async (req, res) => {
     try {
-      const { termino } = req.query;
+      const { termino, bodega } = req.query;
       if (!termino || termino.trim().length < 2) {
         return res.json([]);
       }
 
-      const productos = await productsService.buscarProductos(termino);
+      const productos = await productsService.buscarProductos(termino, bodega);
       res.json(productos);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -77,7 +80,8 @@ const productsController = {
   getProductoById: async (req, res) => {
     try {
       const { id } = req.params;
-      const producto = await productsService.getProductoById(parseInt(id));
+      const { bodega } = req.query;
+      const producto = await productsService.getProductoById(parseInt(id), bodega);
       res.json(producto);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -97,6 +101,7 @@ const productsController = {
         stock_minimo: parseInt(req.body.stock_minimo || 0),
         codigo_barras: req.body.codigo_barras || null,
         productos_similares: JSON.parse(req.body.productos_similares || "[]"),
+        idbodega: req.body.idbodega ? parseInt(req.body.idbodega) : null,
       };
 
       let imagenFile = null;
@@ -132,6 +137,7 @@ const productsController = {
         stock_minimo: parseInt(req.body.stock_minimo || 0),
         codigo_barras: req.body.codigo_barras || null,
         productos_similares: JSON.parse(req.body.productos_similares || "[]"),
+        idbodega: req.body.idbodega ? parseInt(req.body.idbodega) : null,
       };
 
       let imagenFile = null;
@@ -167,9 +173,12 @@ const productsController = {
     try {
       const { id } = req.params;
       const { cantidad } = req.body;
+      const { bodega } = req.query;
+      
       const producto = await productsService.updateStockProducto(
         parseInt(id),
         cantidad,
+        bodega,
       );
       res.json(producto);
     } catch (error) {

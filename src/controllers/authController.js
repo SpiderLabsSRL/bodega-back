@@ -56,9 +56,20 @@ const verifyToken = async (req, res) => {
   try {
     // El middleware de autenticación ya adjuntó el usuario al request
     if (req.user) {
+      // Asegurar que los datos del usuario incluyan idbodega
+      const userData = {
+        idUsuario: req.user.id,
+        nombres: req.user.nombres,
+        apellidos: req.user.apellidos,
+        usuario: req.user.usuario,
+        rol: req.user.rol,
+        estado: req.user.estado,
+        idbodega: req.user.idbodega
+      };
+      
       res.json({
         success: true,
-        user: req.user
+        user: userData
       });
     } else {
       res.status(401).json({

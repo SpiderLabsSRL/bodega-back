@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 
 const authenticateUser = async (usuario, contraseña) => {
   try {
-    // Buscar usuario en la base de datos
+    // Buscar usuario en la base de datos con información de bodega
     const userQuery = `
       SELECT 
         u.idusuario,
@@ -13,8 +13,11 @@ const authenticateUser = async (usuario, contraseña) => {
         u.usuario,
         u.contraseña,
         u.rol,
-        u.estado
+        u.estado,
+        u.idbodega,
+        b.nombre as bodega_nombre
       FROM usuarios u
+      LEFT JOIN bodegas b ON u.idbodega = b.idbodega
       WHERE u.usuario = $1 AND u.estado IN (0, 1)
     `;
 
@@ -47,12 +50,13 @@ const authenticateUser = async (usuario, contraseña) => {
       };
     }
 
-    // Generar token JWT
+    // Generar token JWT incluyendo idbodega
     const token = jwt.sign(
       {
         id: user.idusuario,
         usuario: user.usuario,
-        rol: user.rol
+        rol: user.rol,
+        idbodega: user.idbodega  // Incluir bodega en el token
       },
       process.env.JWT_SECRET || "your-secret-key",
       { expiresIn: "24h" }
@@ -65,7 +69,9 @@ const authenticateUser = async (usuario, contraseña) => {
       apellidos: user.apellidos,
       usuario: user.usuario,
       rol: user.rol,
-      estado: user.estado
+      estado: user.estado,
+      idbodega: user.idbodega,
+      bodegaNombre: user.bodega_nombre  // Incluir nombre de bodega (opcional)
     };
 
     return {
