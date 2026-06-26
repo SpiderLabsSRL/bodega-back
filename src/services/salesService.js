@@ -56,6 +56,8 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
   `;
 
   try {
+    console.log("📝 SQL Query:", productsSql);
+    console.log("📝 Params:", params);
     const productsResult = await query(productsSql, params);
     return productsResult.rows;
   } catch (error) {
@@ -117,6 +119,8 @@ const searchClientes = async (searchQuery) => {
 };
 
 const processSale = async (saleData, userId, idbodega = null) => {
+  console.log("🏪 processSale called with:", { userId, idbodega, saleData });
+  
   const client = await pool.connect();
 
   try {
@@ -124,7 +128,7 @@ const processSale = async (saleData, userId, idbodega = null) => {
 
     // Verificar usuario
     const userCheck = await client.query(
-      "SELECT idusuario FROM usuarios WHERE idusuario = $1 AND estado = 0",
+      "SELECT idusuario, idbodega FROM usuarios WHERE idusuario = $1 AND estado = 0",
       [userId],
     );
 
@@ -132,21 +136,19 @@ const processSale = async (saleData, userId, idbodega = null) => {
       throw new Error("Usuario no válido o inactivo");
     }
 
-    // Si no hay idbodega, obtener la bodega del usuario
+    // Si no se proporcionó idbodega, usar la del usuario
     if (!idbodega) {
-      const userBodegaResult = await client.query(
-        "SELECT idbodega FROM usuarios WHERE idusuario = $1",
-        [userId]
-      );
-      if (userBodegaResult.rows.length > 0 && userBodegaResult.rows[0].idbodega) {
-        idbodega = userBodegaResult.rows[0].idbodega;
-        console.log("Using user's bodega:", idbodega);
-      } else {
-        throw new Error("No se pudo determinar la bodega para la venta");
+      idbodega = userCheck.rows[0].idbodega;
+      console.log("📦 Usando bodega del usuario:", idbodega);
+      
+      if (!idbodega) {
+        throw new Error("El usuario no tiene una bodega asignada");
       }
     }
 
-    // Verificar stock para cada producto
+    console.log("🏢 Bodega final para la venta:", idbodega);
+
+    // Verificar stock para cada producto en la bodega específica
     for (const item of saleData.items) {
       const stockCheckSql = `
         SELECT COALESCE(pb.stock, 0) as stock, p.nombre 
@@ -182,19 +184,21 @@ const processSale = async (saleData, userId, idbodega = null) => {
         userId,
         idbodega,
         saleData.idcliente || null,
-        saleData.descripcion,
-        saleData.sub_total,
-        saleData.descuento,
-        saleData.total,
-        saleData.metodo_pago,
+        saleData.descripcion || '',
+        saleData.sub_total || 0,
+        saleData.descuento || 0,
+        saleData.total || 0,
+        saleData.metodo_pago || 'Efectivo',
         saleData.descripcion_descuento || '',
       ],
     );
 
     const saleId = saleResult.rows[0].idventa;
+    console.log("✅ Venta creada con ID:", saleId);
 
     // Insertar detalle de venta y actualizar stock
     for (const item of saleData.items) {
+      // Insertar detalle
       await client.query(
         `INSERT INTO detalle_ventas (idventa, idproducto, idbodega, cantidad, precio_unitario, subtotal_linea) 
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -209,20 +213,33 @@ const processSale = async (saleData, userId, idbodega = null) => {
       );
 
       // Actualizar stock en producto_bodega
-      await client.query(
-        `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
-         VALUES ($1, $2, $3, 0)
-         ON CONFLICT (idproducto, idbodega) 
-         DO UPDATE SET stock = producto_bodega.stock - $3`,
-        [item.idproducto, idbodega, item.cantidad],
+      const updateStockResult = await client.query(
+        `UPDATE producto_bodega 
+         SET stock = stock - $1 
+         WHERE idproducto = $2 AND idbodega = $3
+         RETURNING stock`,
+        [item.cantidad, item.idproducto, idbodega],
       );
+
+      if (updateStockResult.rows.length === 0) {
+        // Si no existe el registro, crearlo con stock negativo (no debería pasar)
+        await client.query(
+          `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
+           VALUES ($1, $2, -$3, 0)`,
+          [item.idproducto, idbodega, item.cantidad],
+        );
+      }
+
+      console.log(`📦 Stock actualizado para producto ${item.idproducto} en bodega ${idbodega}`);
     }
 
     await client.query("COMMIT");
+    console.log("✅ Venta completada exitosamente");
 
     return { idventa: saleId };
   } catch (error) {
     await client.query("ROLLBACK");
+    console.error("❌ Error en processSale:", error);
     throw error;
   } finally {
     client.release();
