@@ -426,7 +426,6 @@ const BodegaService = {
           }
         }
 
-        // Insertar productos similares
         if (productos_similares && Array.isArray(productos_similares) && productos_similares.length > 0) {
           for (const idSimilar of productos_similares) {
             const idSimilarNum = typeof idSimilar === 'string' ? parseInt(idSimilar) : idSimilar;
@@ -598,9 +597,7 @@ const BodegaService = {
         }
       }
 
-      // Actualizar productos similares
       if (productos_similares && Array.isArray(productos_similares)) {
-        // Eliminar relaciones existentes
         await client.query(
           "DELETE FROM productos_similares WHERE idproducto = $1 OR idproducto_similar = $1",
           [id]
@@ -732,10 +729,21 @@ const BodegaService = {
     }
   },
 
-  getUbicaciones: async () => {
-    const result = await query(
-      `SELECT idubicacion, nombre, estado FROM ubicaciones WHERE estado = 0 ORDER BY nombre`
-    );
+  // ============================================
+  // FUNCIONES PARA DATOS MAESTROS
+  // ============================================
+
+  getUbicaciones: async (idbodega = null) => {
+    let queryText = `SELECT idubicacion, nombre, estado, idbodega FROM ubicaciones WHERE estado = 0`;
+    const params = [];
+    
+    if (idbodega) {
+      queryText += ` AND idbodega = $1`;
+      params.push(idbodega);
+    }
+    
+    queryText += ` ORDER BY nombre`;
+    const result = await query(queryText, params);
     return result.rows;
   },
 

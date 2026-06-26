@@ -312,7 +312,8 @@ const BodegaController = {
 
   getUbicaciones: async (req, res) => {
     try {
-      const ubicaciones = await BodegaService.getUbicaciones();
+      const { bodega } = req.query;
+      const ubicaciones = await BodegaService.getUbicaciones(bodega);
       res.json(ubicaciones);
     } catch (error) {
       console.error("Error en getUbicaciones:", error);

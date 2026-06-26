@@ -1,7 +1,11 @@
+// src/controllers/ManagementSectionController.js
 const ManagementSectionService = require("../services/ManagementSectionService");
 
 class ManagementSectionController {
-  // Categorías
+  // ============================================
+  // CATEGORÍAS
+  // ============================================
+
   static async getCategorias(req, res) {
     try {
       const categorias = await ManagementSectionService.getCategorias();
@@ -14,7 +18,10 @@ class ManagementSectionController {
   static async createCategoria(req, res) {
     try {
       const { nombre } = req.body;
-      const nuevaCategoria = await ManagementSectionService.createCategoria(nombre);
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      const nuevaCategoria = await ManagementSectionService.createCategoria(nombre.trim());
       res.status(201).json(nuevaCategoria);
     } catch (error) {
       res.status(400).json({ error: error.message });
@@ -25,7 +32,10 @@ class ManagementSectionController {
     try {
       const { id } = req.params;
       const { nombre } = req.body;
-      const categoriaActualizada = await ManagementSectionService.updateCategoria(parseInt(id), nombre);
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      const categoriaActualizada = await ManagementSectionService.updateCategoria(parseInt(id), nombre.trim());
       res.json(categoriaActualizada);
     } catch (error) {
       res.status(400).json({ error: error.message });
@@ -42,10 +52,14 @@ class ManagementSectionController {
     }
   }
 
-  // Ubicaciones
+  // ============================================
+  // UBICACIONES
+  // ============================================
+
   static async getUbicaciones(req, res) {
     try {
-      const ubicaciones = await ManagementSectionService.getUbicaciones();
+      const { bodega } = req.query;
+      const ubicaciones = await ManagementSectionService.getUbicaciones(bodega);
       res.json(ubicaciones);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -54,10 +68,21 @@ class ManagementSectionController {
 
   static async createUbicacion(req, res) {
     try {
-      const { nombre } = req.body;
-      const nuevaUbicacion = await ManagementSectionService.createUbicacion(nombre);
+      const { nombre, idbodega } = req.body;
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      
+      // Si no se envía idbodega, se asigna null (ubicación sin bodega)
+      const bodegaId = idbodega !== undefined && idbodega !== null ? parseInt(idbodega) : null;
+      
+      const nuevaUbicacion = await ManagementSectionService.createUbicacion(
+        nombre.trim(),
+        bodegaId
+      );
       res.status(201).json(nuevaUbicacion);
     } catch (error) {
+      console.error("Error en createUbicacion:", error);
       res.status(400).json({ error: error.message });
     }
   }
@@ -65,10 +90,21 @@ class ManagementSectionController {
   static async updateUbicacion(req, res) {
     try {
       const { id } = req.params;
-      const { nombre } = req.body;
-      const ubicacionActualizada = await ManagementSectionService.updateUbicacion(parseInt(id), nombre);
+      const { nombre, idbodega } = req.body;
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      
+      const bodegaId = idbodega !== undefined && idbodega !== null ? parseInt(idbodega) : null;
+      
+      const ubicacionActualizada = await ManagementSectionService.updateUbicacion(
+        parseInt(id),
+        nombre.trim(),
+        bodegaId
+      );
       res.json(ubicacionActualizada);
     } catch (error) {
+      console.error("Error en updateUbicacion:", error);
       res.status(400).json({ error: error.message });
     }
   }

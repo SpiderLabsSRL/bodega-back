@@ -64,7 +64,7 @@ router.patch("/productos/:id/stock", BodegaController.updateStock);
 // Transferir producto a otra bodega
 router.post("/transferir", BodegaController.transferirProducto);
 
-// Obtener ubicaciones
+// Obtener ubicaciones (con filtro por bodega opcional)
 router.get("/ubicaciones", BodegaController.getUbicaciones);
 
 // Obtener categorías
