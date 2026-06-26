@@ -2,6 +2,20 @@
 const { query } = require("../../db");
 
 const ventasService = {
+  getBodegas: async () => {
+    try {
+      const result = await query(
+        `SELECT idbodega, nombre, tipo 
+         FROM bodegas 
+         WHERE estado = 0
+         ORDER BY nombre`
+      );
+      return result.rows;
+    } catch (error) {
+      throw new Error("Error al obtener bodegas: " + error.message);
+    }
+  },
+
   getUsuariosVentas: async () => {
     try {
       const result = await query(
@@ -22,7 +36,7 @@ const ventasService = {
       let queryParams = [];
       let paramCount = 0;
 
-      // Filtro por empleado (usamos el username, no el nombre completo)
+      // Filtro por empleado (usamos el username)
       if (filtros.empleado && filtros.empleado !== "Todos") {
         paramCount++;
         whereConditions.push(`u.usuario = $${paramCount}`);
@@ -34,6 +48,13 @@ const ventasService = {
         paramCount++;
         whereConditions.push(`v.metodo_pago = $${paramCount}`);
         queryParams.push(filtros.metodo);
+      }
+
+      // Filtro por bodega
+      if (filtros.bodega) {
+        paramCount++;
+        whereConditions.push(`v.idbodega = $${paramCount}`);
+        queryParams.push(filtros.bodega);
       }
 
       // Filtro por fecha específica
@@ -61,14 +82,12 @@ const ventasService = {
 
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
-      console.log("Query conditions:", whereConditions);
-      console.log("Query params:", queryParams);
-
       const ventasQuery = `
         SELECT 
           v.idventa,
           v.fecha_hora,
           v.idusuario,
+          v.idbodega,
           v.descripcion,
           v.sub_total,
           v.descuento,
@@ -77,17 +96,17 @@ const ventasService = {
           v.metodo_pago,
           u.nombres as usuario_nombre,
           u.apellidos as usuario_apellidos,
-          u.usuario as usuario_usuario
+          u.usuario as usuario_usuario,
+          b.nombre as bodega_nombre
         FROM ventas v
         INNER JOIN usuarios u ON v.idusuario = u.idusuario
+        LEFT JOIN bodegas b ON v.idbodega = b.idbodega
         ${whereClause}
         ORDER BY v.fecha_hora DESC
       `;
 
       const ventasResult = await query(ventasQuery, queryParams);
       const ventas = ventasResult.rows;
-
-      console.log(`Ventas encontradas: ${ventas.length}`);
 
       // Obtener detalles para cada venta
       for (let venta of ventas) {
@@ -120,7 +139,7 @@ const ventasService = {
       let queryParams = [];
       let paramCount = 0;
 
-      // Filtro por empleado (usamos el username, no el nombre completo)
+      // Filtro por empleado
       if (filtros.empleado && filtros.empleado !== "Todos") {
         paramCount++;
         whereConditions.push(`u.usuario = $${paramCount}`);
@@ -132,6 +151,13 @@ const ventasService = {
         paramCount++;
         whereConditions.push(`v.metodo_pago = $${paramCount}`);
         queryParams.push(filtros.metodo);
+      }
+
+      // Filtro por bodega
+      if (filtros.bodega) {
+        paramCount++;
+        whereConditions.push(`v.idbodega = $${paramCount}`);
+        queryParams.push(filtros.bodega);
       }
 
       // Filtro por fecha específica
@@ -183,6 +209,7 @@ const ventasService = {
           v.idventa,
           v.fecha_hora,
           v.idusuario,
+          v.idbodega,
           v.descripcion,
           v.sub_total,
           v.descuento,
@@ -190,9 +217,11 @@ const ventasService = {
           v.metodo_pago,
           u.nombres as usuario_nombre,
           u.apellidos as usuario_apellidos,
-          u.usuario as usuario_usuario
+          u.usuario as usuario_usuario,
+          b.nombre as bodega_nombre
         FROM ventas v
         INNER JOIN usuarios u ON v.idusuario = u.idusuario
+        LEFT JOIN bodegas b ON v.idbodega = b.idbodega
         WHERE DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = CURRENT_DATE
           AND u.usuario = $1
         ORDER BY v.fecha_hora DESC

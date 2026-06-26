@@ -1,6 +1,16 @@
 const ventasService = require("../services/ventasService");
 
 const ventasController = {
+  getBodegas: async (req, res) => {
+    try {
+      const bodegas = await ventasService.getBodegas();
+      res.json(bodegas);
+    } catch (error) {
+      console.error("Error en getBodegas:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
   getUsuariosVentas: async (req, res) => {
     try {
       const usuarios = await ventasService.getUsuariosVentas();
@@ -13,11 +23,12 @@ const ventasController = {
 
   getVentas: async (req, res) => {
     try {
-      const { empleado, metodo, fechaEspecifica, fechaInicio, fechaFin } = req.query;
+      const { empleado, metodo, bodega, fechaEspecifica, fechaInicio, fechaFin } = req.query;
       
       const ventas = await ventasService.getVentas({
         empleado,
         metodo,
+        bodega,
         fechaEspecifica,
         fechaInicio,
         fechaFin
@@ -32,11 +43,12 @@ const ventasController = {
 
   getTotalesVentas: async (req, res) => {
     try {
-      const { empleado, metodo, fechaEspecifica, fechaInicio, fechaFin } = req.query;
+      const { empleado, metodo, bodega, fechaEspecifica, fechaInicio, fechaFin } = req.query;
       
       const totales = await ventasService.getTotalesVentas({
         empleado,
         metodo,
+        bodega,
         fechaEspecifica,
         fechaInicio,
         fechaFin
