@@ -1,19 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const pagosController = require("../controllers/pagosController");
+const { authenticate } = require("../middleware/auth");
 
-// Obtener todas las cotizaciones con pagos pendientes
-router.get("/pagos/pendientes", pagosController.getPagosPendientes);
+// Todas las rutas protegidas con authenticate
+router.get("/pagos/pendientes", authenticate, pagosController.getPagosPendientes);
+router.post("/pagos/procesar-pago/:id", authenticate, pagosController.procesarPago);
+router.put("/pagos/actualizar-entregas/:id", authenticate, pagosController.actualizarEntregas);
+router.patch("/pagos/marcar-entregado/:id", authenticate, pagosController.marcarComoEntregado);
+router.delete("/pagos/eliminar/:id", authenticate, pagosController.eliminarCotizacion);
 
-// Procesar pago de una cotización
-router.post("/pagos/procesar-pago/:id", pagosController.procesarPago);
-
-// Actualizar entregas de productos
-router.put("/pagos/actualizar-entregas/:id", pagosController.actualizarEntregas);
-
-// Marcar cotización como completamente entregada
-router.patch("/pagos/marcar-entregado/:id", pagosController.marcarComoEntregado);
-// Eliminar cotización (cambiar estado a 1)
-router.delete("/pagos/eliminar/:id", pagosController.eliminarCotizacion);
-
-module.exports = router; 
+module.exports = router;

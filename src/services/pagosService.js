@@ -1,8 +1,10 @@
 const { query, pool } = require("../../db");
 
-exports.obtenerPagosPendientes = async () => {
+exports.obtenerPagosPendientes = async (idusuario = null, idbodega = null, rol = null) => {
   try {
-    const result = await query(`
+    console.log("🔍 Obteniendo pagos pendientes - Usuario:", idusuario, "Bodega:", idbodega, "Rol:", rol);
+    
+    let sql = `
       SELECT 
         c.idcotizacion,
         TO_CHAR(TIMEZONE('America/La_Paz', c.fecha_creacion), 'YYYY-MM-DD') as fecha,
@@ -12,6 +14,10 @@ exports.obtenerPagosPendientes = async () => {
         c.total,
         c.abono,
         c.saldo,
+        c.idbodega,
+        b.nombre as bodega_nombre,
+        u.nombres || ' ' || u.apellidos as usuario_nombre,
+        u.usuario as usuario_login,
         COALESCE(
           JSON_AGG(
             JSON_BUILD_OBJECT(
@@ -36,26 +42,53 @@ exports.obtenerPagosPendientes = async () => {
       FROM cotizaciones c
       INNER JOIN detalle_cotizaciones dc ON c.idcotizacion = dc.idcotizacion
       INNER JOIN productos p ON dc.idproducto = p.idproducto
+      INNER JOIN usuarios u ON c.idusuario = u.idusuario
       LEFT JOIN productos_pendientes_cotizacion ppc ON c.idcotizacion = ppc.idcotizacion AND p.idproducto = ppc.idproducto
+      LEFT JOIN bodegas b ON c.idbodega = b.idbodega
       WHERE c.estado = 0 
         AND (c.saldo > 0 OR EXISTS (
           SELECT 1 FROM productos_pendientes_cotizacion ppc2 
           WHERE ppc2.idcotizacion = c.idcotizacion AND ppc2.cantidad_pendiente > 0
         ))
-      GROUP BY c.idcotizacion, c.cliente_nombre, c.cliente_telefono, c.tipo_pago, c.total, c.abono, c.saldo, c.fecha_creacion
-      ORDER BY c.fecha_creacion DESC, c.idcotizacion DESC
-    `);
+    `;
 
-    console.log("Pagos pendientes encontrados:", result.rows.length);
+    const params = [];
+    let paramCount = 1;
     
-    // Log para debug con fecha real
+    // Si NO es Admin, filtrar por usuario
+    if (rol && rol !== 'Admin') {
+      sql += ` AND c.idusuario = $${paramCount}`;
+      params.push(idusuario);
+      paramCount++;
+    }
+    
+    // Filtrar por bodega si se proporciona (para Admins)
+    if (rol && rol === 'Admin' && idbodega) {
+      sql += ` AND c.idbodega = $${paramCount}`;
+      params.push(idbodega);
+      paramCount++;
+    }
+
+    sql += `
+      GROUP BY c.idcotizacion, c.cliente_nombre, c.cliente_telefono, c.tipo_pago, c.total, c.abono, c.saldo, c.fecha_creacion, c.idbodega, b.nombre, u.nombres, u.apellidos, u.usuario
+      ORDER BY c.fecha_creacion DESC, c.idcotizacion DESC
+    `;
+
+    console.log("📝 SQL Query:", sql);
+    console.log("📝 Params:", params);
+
+    const result = await query(sql, params);
+
+    console.log("✅ Pagos pendientes encontrados:", result.rows.length);
+    
+    // Log para debug
     result.rows.forEach(row => {
-      console.log(`COT-${row.idcotizacion}: Fecha=${row.fecha}, Saldo=${row.saldo}, Productos pendientes=${row.productos.some(p => p.cantidad_pendiente > 0)}`);
+      console.log(`COT-${row.idcotizacion}: Fecha=${row.fecha}, Saldo=${row.saldo}, Usuario=${row.usuario_nombre}, Bodega=${row.bodega_nombre || row.idbodega}`);
     });
     
     return result.rows;
   } catch (error) {
-    console.error("Error en obtenerPagosPendientes:", error);
+    console.error("❌ Error en obtenerPagosPendientes:", error);
     throw error;
   }
 };
@@ -68,7 +101,7 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
 
     // 1. Verificar que la cotización existe y tiene saldo pendiente
     const cotizacionResult = await client.query(
-      'SELECT saldo, total FROM cotizaciones WHERE idcotizacion = $1 AND estado = 0',
+      'SELECT saldo, total, idbodega FROM cotizaciones WHERE idcotizacion = $1 AND estado = 0',
       [idcotizacion]
     );
 
@@ -78,6 +111,7 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
 
     const cotizacion = cotizacionResult.rows[0];
     const saldoPendiente = parseFloat(cotizacion.saldo);
+    const idbodega = cotizacion.idbodega;
 
     if (monto > saldoPendiente) {
       throw new Error("El monto a pagar excede el saldo pendiente");
@@ -94,16 +128,16 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
 
     // 3. Solo registrar en caja si el método de pago es efectivo
     if (metodoPago === 'efectivo') {
-      // Obtener el último estado de caja del usuario
+      // Obtener el último estado de caja del usuario y bodega
       const estadoCajaQuery = `
         SELECT idestado_caja, estado, monto_final
         FROM estado_caja 
-        WHERE idusuario = $1 
+        WHERE idusuario = $1 AND idbodega = $2
         ORDER BY idestado_caja DESC 
         LIMIT 1
       `;
       
-      const estadoCajaResult = await client.query(estadoCajaQuery, [idusuario]);
+      const estadoCajaResult = await client.query(estadoCajaQuery, [idusuario, idbodega]);
       
       if (estadoCajaResult.rows.length === 0 || estadoCajaResult.rows[0].estado !== 'abierta') {
         throw new Error("La caja no está abierta para realizar transacciones");
@@ -114,10 +148,10 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
       // Registrar transacción en caja
       await client.query(
         `
-        INSERT INTO transacciones_caja (tipo_movimiento, descripcion, monto, fecha, idestado_caja, idusuario)
-        VALUES ('Ingreso', 'Pago de cotización COT-${idcotizacion}', $1, TIMEZONE('America/La_Paz', NOW()), $2, $3)
+        INSERT INTO transacciones_caja (tipo_movimiento, descripcion, monto, fecha, idestado_caja, idusuario, idbodega)
+        VALUES ('Ingreso', 'Pago de cotización COT-${idcotizacion}', $1, TIMEZONE('America/La_Paz', NOW()), $2, $3, $4)
         `,
-        [monto, idestado_caja, idusuario]
+        [monto, idestado_caja, idusuario, idbodega]
       );
 
       // Actualizar monto final en estado_caja
@@ -128,9 +162,11 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
     }
 
     await client.query('COMMIT');
+    console.log(`✅ Pago procesado exitosamente para cotización COT-${idcotizacion}`);
+    return { success: true };
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("Error en procesarPagoCotizacion:", error);
+    console.error("❌ Error en procesarPagoCotizacion:", error);
     throw error;
   } finally {
     client.release();
@@ -143,15 +179,15 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
   try {
     await client.query('BEGIN');
 
-    console.log('Iniciando proceso para cotización:', idcotizacion);
-    console.log('Productos recibidos:', productos);
-    console.log('Monto pago:', montoPago);
-    console.log('Método pago:', metodoPago);
-    console.log('Usuario:', idusuario);
+    console.log('📦 Iniciando proceso para cotización:', idcotizacion);
+    console.log('📦 Productos recibidos:', productos);
+    console.log('💰 Monto pago:', montoPago);
+    console.log('💳 Método pago:', metodoPago);
+    console.log('👤 Usuario:', idusuario);
 
-    // Obtener información de la cotización
+    // Obtener información de la cotización incluyendo bodega
     const cotizacionInfo = await client.query(
-      'SELECT cliente_nombre, saldo, total FROM cotizaciones WHERE idcotizacion = $1 AND estado = 0',
+      'SELECT cliente_nombre, saldo, total, idbodega FROM cotizaciones WHERE idcotizacion = $1 AND estado = 0',
       [idcotizacion]
     );
 
@@ -162,8 +198,10 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
     const clienteNombre = cotizacionInfo.rows[0].cliente_nombre;
     const saldoActual = parseFloat(cotizacionInfo.rows[0].saldo);
     const totalCotizacion = parseFloat(cotizacionInfo.rows[0].total);
+    const idbodega = cotizacionInfo.rows[0].idbodega;
 
     console.log('Saldo actual:', saldoActual, 'Total cotización:', totalCotizacion);
+    console.log('Bodega:', idbodega);
 
     // Validar monto de pago
     if (montoPago > 0 && montoPago > saldoActual) {
@@ -183,19 +221,22 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
 
       productosEntregados = true;
 
-      console.log(`Procesando entrega: producto ${idproducto}, cantidad: ${cantidadEntregada}`);
+      console.log(`📦 Procesando entrega: producto ${idproducto}, cantidad: ${cantidadEntregada}`);
 
-      // Verificar stock
+      // Verificar stock en la bodega específica
       const stockResult = await client.query(
-        'SELECT stock, nombre FROM productos WHERE idproducto = $1',
-        [idproducto]
+        `SELECT pb.stock, p.nombre 
+         FROM productos p
+         LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto AND pb.idbodega = $2
+         WHERE p.idproducto = $1`,
+        [idproducto, idbodega]
       );
 
       if (stockResult.rows.length === 0) {
         throw new Error(`El producto ${idproducto} no existe`);
       }
 
-      const stockActual = stockResult.rows[0].stock;
+      const stockActual = stockResult.rows[0].stock || 0;
       const nombreProducto = stockResult.rows[0].nombre;
 
       if (cantidadEntregada > stockActual) {
@@ -249,13 +290,16 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
         );
       }
 
-      // Actualizar stock del producto
+      // Actualizar stock del producto en la bodega específica
       await client.query(
-        'UPDATE productos SET stock = stock - $1 WHERE idproducto = $2',
-        [cantidadEntregada, idproducto]
+        `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
+         VALUES ($1, $2, -$3, 0)
+         ON CONFLICT (idproducto, idbodega) 
+         DO UPDATE SET stock = producto_bodega.stock - $3`,
+        [idproducto, idbodega, cantidadEntregada]
       );
 
-      console.log(`Stock actualizado para ${productoNombre}: -${cantidadEntregada} unidades`);
+      console.log(`✅ Stock actualizado para ${productoNombre}: -${cantidadEntregada} unidades en bodega ${idbodega}`);
 
       // Agregar item para la venta (solo para registrar los productos entregados)
       itemsVenta.push({
@@ -292,27 +336,27 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
 
       console.log('Creando venta. Descripción:', descripcionVenta, 'Monto:', montoPago);
 
-      // Insertar venta - EL MONTO ES EXACTAMENTE EL QUE SE INGRESÓ
+      // Insertar venta con bodega
       const ventaResult = await client.query(
-        `INSERT INTO ventas (fecha_hora, idusuario, descripcion, sub_total, descuento, total, metodo_pago) 
-         VALUES (TIMEZONE('America/La_Paz', NOW()), $1, $2, $3, $4, $5, $6) 
+        `INSERT INTO ventas (fecha_hora, idusuario, idbodega, descripcion, sub_total, descuento, total, metodo_pago) 
+         VALUES (TIMEZONE('America/La_Paz', NOW()), $1, $2, $3, $4, $5, $6, $7) 
          RETURNING idventa`,
-        [idusuario, descripcionVenta, montoPago, 0, montoPago, metodoPago === 'efectivo' ? 'Efectivo' : 'QR']
+        [idusuario, idbodega, descripcionVenta, montoPago, 0, montoPago, metodoPago === 'efectivo' ? 'Efectivo' : 'QR']
       );
       
       idventa = ventaResult.rows[0].idventa;
-      console.log('Venta creada con ID:', idventa);
+      console.log('✅ Venta creada con ID:', idventa);
 
       // Insertar detalles de venta solo si hay productos entregados
       if (productosEntregados && itemsVenta.length > 0) {
         for (const item of itemsVenta) {
           await client.query(
-            `INSERT INTO detalle_ventas (idventa, idproducto, cantidad, precio_unitario, subtotal_linea) 
-             VALUES ($1, $2, $3, $4, $5)`,
-            [idventa, item.idproducto, item.cantidad, item.precio_unitario, item.subtotal_linea]
+            `INSERT INTO detalle_ventas (idventa, idproducto, idbodega, cantidad, precio_unitario, subtotal_linea) 
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [idventa, item.idproducto, idbodega, item.cantidad, item.precio_unitario, item.subtotal_linea]
           );
         }
-        console.log('Detalles de venta insertados:', itemsVenta.length, 'items');
+        console.log('✅ Detalles de venta insertados:', itemsVenta.length, 'items');
       }
 
       // Registrar en caja solo si es efectivo y hay monto
@@ -320,21 +364,21 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
         const estadoCajaQuery = `
           SELECT idestado_caja, estado, monto_final
           FROM estado_caja 
-          WHERE idusuario = $1 
+          WHERE idusuario = $1 AND idbodega = $2
           ORDER BY idestado_caja DESC 
           LIMIT 1
         `;
         
-        const estadoCajaResult = await client.query(estadoCajaQuery, [idusuario]);
+        const estadoCajaResult = await client.query(estadoCajaQuery, [idusuario, idbodega]);
         
         if (estadoCajaResult.rows.length > 0 && estadoCajaResult.rows[0].estado === 'abierta') {
           const idestado_caja = estadoCajaResult.rows[0].idestado_caja;
 
           // MISMA DESCRIPCIÓN QUE EN VENTAS Y MISMO MONTO
           await client.query(
-            `INSERT INTO transacciones_caja (idestado_caja, tipo_movimiento, descripcion, monto, fecha, idusuario, idventa)
-             VALUES ($1, 'Ingreso', $2, $3, TIMEZONE('America/La_Paz', NOW()), $4, $5)`,
-            [idestado_caja, descripcionVenta, montoPago, idusuario, idventa]
+            `INSERT INTO transacciones_caja (idestado_caja, tipo_movimiento, descripcion, monto, fecha, idusuario, idventa, idbodega)
+             VALUES ($1, 'Ingreso', $2, $3, TIMEZONE('America/La_Paz', NOW()), $4, $5, $6)`,
+            [idestado_caja, descripcionVenta, montoPago, idusuario, idventa, idbodega]
           );
 
           // Actualizar monto final en estado_caja
@@ -343,14 +387,11 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
             [montoPago, idestado_caja]
           );
 
-          console.log('Transacción de caja registrada. Monto:', montoPago);
+          console.log('✅ Transacción de caja registrada. Monto:', montoPago);
         } else {
           throw new Error("La caja no está abierta para registrar pagos en efectivo");
         }
       }
-    } else {
-      // Este caso no debería ocurrir porque el frontend valida que haya al menos productos o monto
-      console.log('No hay productos entregados ni monto de pago - no se crea venta');
     }
 
     // 3. Actualizar saldo de la cotización si hay pago
@@ -363,21 +404,23 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
         [nuevoSaldo, nuevoAbono, idcotizacion]
       );
 
-      console.log('Saldo de cotización actualizado. Nuevo saldo:', nuevoSaldo);
+      console.log('✅ Saldo de cotización actualizado. Nuevo saldo:', nuevoSaldo);
     }
 
     await client.query('COMMIT');
     
-    console.log(`Proceso completado exitosamente para cotización COT-${idcotizacion}`);
+    console.log(`✅ Proceso completado exitosamente para cotización COT-${idcotizacion}`);
     console.log(`- Productos entregados: ${productosEntregados ? 'Sí' : 'No'}`);
     console.log(`- Monto registrado: Bs ${montoPago}`);
     console.log(`- Método pago: ${metodoPago}`);
+    console.log(`- Bodega: ${idbodega}`);
     console.log(`- Stock actualizado: ${productosEntregados ? 'Sí' : 'No'}`);
     console.log(`- Venta creada: ${idventa ? 'Sí (ID: ' + idventa + ')' : 'No'}`);
     
+    return { success: true, idventa };
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("Error en actualizarEntregasProductos:", error);
+    console.error("❌ Error en actualizarEntregasProductos:", error);
     console.error("Detalles del error:", error.message);
     console.error("Stack trace:", error.stack);
     throw error;
@@ -414,13 +457,13 @@ exports.marcarCotizacionEntregada = async (idcotizacion) => {
       throw new Error("No se puede marcar como entregada: existe saldo pendiente");
     }
 
-    // Aquí podrías agregar lógica adicional si necesitas marcar algo específico
-    console.log(`Cotización ${idcotizacion} verificada como completamente entregada`);
+    console.log(`✅ Cotización ${idcotizacion} verificada como completamente entregada`);
     
     await client.query('COMMIT');
+    return { success: true };
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("Error en marcarCotizacionEntregada:", error);
+    console.error("❌ Error en marcarCotizacionEntregada:", error);
     throw error;
   } finally {
     client.release();
@@ -435,7 +478,7 @@ exports.eliminarCotizacion = async (idcotizacion) => {
 
     // Verificar que la cotización existe
     const cotizacionResult = await client.query(
-      'SELECT estado FROM cotizaciones WHERE idcotizacion = $1',
+      'SELECT estado, idbodega FROM cotizaciones WHERE idcotizacion = $1',
       [idcotizacion]
     );
 
@@ -450,9 +493,11 @@ exports.eliminarCotizacion = async (idcotizacion) => {
     );
 
     await client.query('COMMIT');
+    console.log(`✅ Cotización ${idcotizacion} eliminada exitosamente`);
+    return { success: true };
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("Error en eliminarCotizacion:", error);
+    console.error("❌ Error en eliminarCotizacion:", error);
     throw error;
   } finally {
     client.release();
