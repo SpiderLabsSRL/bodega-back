@@ -16,11 +16,77 @@ const cotizacionesService = {
       
       const idusuario = usuarioResult.rows[0].idusuario;
       
+      // Buscar o crear cliente
+      let idcliente = null;
+      
+      if (cotizacionData.cliente_nombre) {
+        // Buscar cliente existente por nombre y teléfono
+        const searchClienteSql = `
+          SELECT idcliente 
+          FROM clientes 
+          WHERE estado = 0 
+            AND nombres || ' ' || apellidos ILIKE $1 
+            AND celular = $2
+          LIMIT 1
+        `;
+        
+        const searchResult = await client.query(searchClienteSql, [
+          `%${cotizacionData.cliente_nombre}%`,
+          cotizacionData.cliente_telefono || ''
+        ]);
+        
+        if (searchResult.rows.length > 0) {
+          // Cliente existente
+          idcliente = searchResult.rows[0].idcliente;
+        } else if (cotizacionData.guardar_cliente !== false) {
+          // Crear nuevo cliente si no existe y se solicita guardar
+          // Intentar buscar por carnet si existe
+          if (cotizacionData.carnet) {
+            const carnetCheck = await client.query(
+              'SELECT idcliente FROM clientes WHERE carnet = $1 AND estado = 0',
+              [cotizacionData.carnet]
+            );
+            if (carnetCheck.rows.length > 0) {
+              idcliente = carnetCheck.rows[0].idcliente;
+            }
+          }
+          
+          // Si no se encontró por carnet, crear nuevo cliente
+          if (!idcliente) {
+            const nombresParts = cotizacionData.cliente_nombre.trim().split(' ');
+            const nombres = nombresParts.length > 0 ? nombresParts[0] : cotizacionData.cliente_nombre;
+            const apellidos = nombresParts.length > 1 ? nombresParts.slice(1).join(' ') : '';
+            
+            // Generar carnet único si no se proporciona
+            const carnet = cotizacionData.carnet || `TEMP_${Date.now()}`;
+            
+            const insertClienteSql = `
+              INSERT INTO clientes (
+                nombres, apellidos, carnet, celular, nota, estado
+              ) VALUES ($1, $2, $3, $4, $5, 0)
+              RETURNING idcliente
+            `;
+            
+            const clienteResult = await client.query(insertClienteSql, [
+              nombres,
+              apellidos,
+              carnet,
+              cotizacionData.cliente_telefono || '',
+              cotizacionData.cliente_nota || '',
+            ]);
+            
+            idcliente = clienteResult.rows[0].idcliente;
+          }
+        }
+      }
+      
+      // Insertar cotización con idcliente
       const insertCotizacionSql = `
         INSERT INTO cotizaciones (
           vigencia, cliente_nombre, cliente_telefono, cliente_direccion,
-          tipo_pago, sub_total, descuento, total, abono, saldo, idusuario
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          tipo_pago, sub_total, descuento, total, abono, saldo, 
+          idusuario, idcliente
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING *
       `;
       
@@ -35,7 +101,8 @@ const cotizacionesService = {
         cotizacionData.total,
         cotizacionData.abono || 0,
         cotizacionData.saldo || 0,
-        idusuario
+        idusuario,
+        idcliente
       ];
       
       const cotizacionResult = await client.query(insertCotizacionSql, cotizacionValues);
@@ -87,9 +154,13 @@ const cotizacionesService = {
         SELECT 
           c.*,
           u.nombres as usuario_nombre,
-          u.apellidos as usuario_apellido
+          u.apellidos as usuario_apellido,
+          cl.nombres as cliente_nombres,
+          cl.apellidos as cliente_apellidos,
+          cl.carnet as cliente_carnet
         FROM cotizaciones c
         LEFT JOIN usuarios u ON c.idusuario = u.idusuario
+        LEFT JOIN clientes cl ON c.idcliente = cl.idcliente
         WHERE c.estado = 0
         ORDER BY c.fecha_creacion DESC, c.idcotizacion DESC
       `;
@@ -108,9 +179,15 @@ const cotizacionesService = {
         SELECT 
           c.*,
           u.nombres as usuario_nombre,
-          u.apellidos as usuario_apellido
+          u.apellidos as usuario_apellido,
+          cl.nombres as cliente_nombres,
+          cl.apellidos as cliente_apellidos,
+          cl.carnet as cliente_carnet,
+          cl.celular as cliente_celular,
+          cl.nota as cliente_nota
         FROM cotizaciones c
         LEFT JOIN usuarios u ON c.idusuario = u.idusuario
+        LEFT JOIN clientes cl ON c.idcliente = cl.idcliente
         WHERE c.idcotizacion = $1 AND c.estado = 0
       `;
       
@@ -205,14 +282,20 @@ const cotizacionesService = {
         SELECT 
           c.*,
           u.nombres as usuario_nombre,
-          u.apellidos as usuario_apellido
+          u.apellidos as usuario_apellido,
+          cl.nombres as cliente_nombres,
+          cl.apellidos as cliente_apellidos
         FROM cotizaciones c
         LEFT JOIN usuarios u ON c.idusuario = u.idusuario
+        LEFT JOIN clientes cl ON c.idcliente = cl.idcliente
         WHERE c.estado = 0 
           AND (
             c.cliente_nombre ILIKE $1 OR 
             c.cliente_telefono ILIKE $1 OR
-            c.idcotizacion::TEXT ILIKE $1
+            c.idcotizacion::TEXT ILIKE $1 OR
+            cl.nombres ILIKE $1 OR
+            cl.apellidos ILIKE $1 OR
+            cl.carnet ILIKE $1
           )
         ORDER BY c.fecha_creacion DESC, c.idcotizacion DESC
         LIMIT 20
