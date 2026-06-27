@@ -87,6 +87,7 @@ const ventasService = {
           v.idventa,
           v.fecha_hora,
           v.idusuario,
+          v.idcliente,
           v.idbodega,
           v.descripcion,
           v.sub_total,
@@ -97,10 +98,12 @@ const ventasService = {
           u.nombres as usuario_nombre,
           u.apellidos as usuario_apellidos,
           u.usuario as usuario_usuario,
-          b.nombre as bodega_nombre
+          b.nombre as bodega_nombre,
+          COALESCE(c.nombres || ' ' || c.apellidos, 'No especificado') as cliente_nombre
         FROM ventas v
         INNER JOIN usuarios u ON v.idusuario = u.idusuario
         LEFT JOIN bodegas b ON v.idbodega = b.idbodega
+        LEFT JOIN clientes c ON v.idcliente = c.idcliente
         ${whereClause}
         ORDER BY v.fecha_hora DESC
       `;
@@ -209,6 +212,7 @@ const ventasService = {
           v.idventa,
           v.fecha_hora,
           v.idusuario,
+          v.idcliente,
           v.idbodega,
           v.descripcion,
           v.sub_total,
@@ -218,10 +222,12 @@ const ventasService = {
           u.nombres as usuario_nombre,
           u.apellidos as usuario_apellidos,
           u.usuario as usuario_usuario,
-          b.nombre as bodega_nombre
+          b.nombre as bodega_nombre,
+          COALESCE(c.nombres || ' ' || c.apellidos, 'No especificado') as cliente_nombre
         FROM ventas v
         INNER JOIN usuarios u ON v.idusuario = u.idusuario
         LEFT JOIN bodegas b ON v.idbodega = b.idbodega
+        LEFT JOIN clientes c ON v.idcliente = c.idcliente
         WHERE DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = CURRENT_DATE
           AND u.usuario = $1
         ORDER BY v.fecha_hora DESC
