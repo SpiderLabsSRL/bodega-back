@@ -1,3 +1,4 @@
+// src/routes/inventoryRoutes.js
 const express = require("express");
 const router = express.Router();
 const inventoryController = require("../controllers/inventoryController");
@@ -6,5 +7,6 @@ const inventoryController = require("../controllers/inventoryController");
 router.get("/inventory/inventory", inventoryController.getInventory);
 router.get("/inventory/inventory/low-margin-count", inventoryController.getLowMarginCount);
 router.get("/inventory/categories", inventoryController.getCategories);
+router.get("/inventory/sucursales", inventoryController.getSucursales);
 
 module.exports = router;

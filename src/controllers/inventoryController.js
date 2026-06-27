@@ -1,16 +1,18 @@
+// src/controllers/inventoryController.js
 const inventoryService = require("../services/inventoryService");
 
 const getInventory = async (req, res) => {
   try {
-    const { search, lowMarginOnly, categories } = req.query;
+    const { search, lowMarginOnly, categories, idbodega } = req.query;
     
-    // Convertir categorías y tipos a arrays si existen
+    // Convertir categorías a arrays si existen
     const categoryArray = categories ? categories.split(',') : [];
     
     const inventory = await inventoryService.getInventory(
       search, 
       lowMarginOnly === 'true',
-      categoryArray
+      categoryArray,
+      idbodega ? parseInt(idbodega) : null
     );
     
     res.json(inventory);
@@ -25,7 +27,10 @@ const getInventory = async (req, res) => {
 
 const getLowMarginCount = async (req, res) => {
   try {
-    const count = await inventoryService.getLowMarginCount();
+    const { idbodega } = req.query;
+    const count = await inventoryService.getLowMarginCount(
+      idbodega ? parseInt(idbodega) : null
+    );
     res.json({ count });
   } catch (error) {
     console.error("Error en getLowMarginCount:", error);
@@ -49,8 +54,22 @@ const getCategories = async (req, res) => {
   }
 };
 
+const getSucursales = async (req, res) => {
+  try {
+    const sucursales = await inventoryService.getSucursales();
+    res.json(sucursales);
+  } catch (error) {
+    console.error("Error en getSucursales:", error);
+    res.status(500).json({ 
+      error: "Error al obtener las sucursales",
+      details: error.message 
+    });
+  }
+};
+
 module.exports = {
   getInventory,
   getLowMarginCount,
-  getCategories
+  getCategories,
+  getSucursales
 };
