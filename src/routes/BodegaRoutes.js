@@ -31,6 +31,7 @@ const upload = multer({
 // RUTAS QUE DEBEN IR PRIMERO (sin parámetros dinámicos)
 // ============================================
 
+router.get("/todas", BodegaController.getTodasBodegas);
 router.get("/activas", BodegaController.getBodegasActivas);
 router.get("/productos/todos", BodegaController.getAllProductos);
 router.get("/buscar", BodegaController.buscarProductos);
@@ -38,37 +39,43 @@ router.get("/buscar", BodegaController.buscarProductos);
 // Crear una nueva bodega (sucursal)
 router.post("/", BodegaController.createBodega);
 
-// Crear un nuevo producto en bodega
+// ============================================
+// RUTAS PARA UBICACIONES
+// ============================================
+router.get("/ubicaciones", BodegaController.getUbicaciones);
+router.post("/ubicaciones", BodegaController.createUbicacion);
+router.put("/ubicaciones/:id", BodegaController.updateUbicacion);
+router.delete("/ubicaciones/:id", BodegaController.deleteUbicacion);
+
+// ============================================
+// RUTAS PARA CATEGORÍAS
+// ============================================
+router.get("/categorias", BodegaController.getCategorias);
+router.post("/categorias", BodegaController.createCategoria);
+router.put("/categorias/:id", BodegaController.updateCategoria);
+router.delete("/categorias/:id", BodegaController.deleteCategoria);
+
+// ============================================
+// RUTAS PARA PRODUCTOS
+// ============================================
 router.post(
   "/productos",
   upload.single("imagen"),
   BodegaController.createProducto
 );
 
-// Actualizar un producto en bodega
 router.put(
   "/productos/:id",
   upload.single("imagen"),
   BodegaController.updateProducto
 );
 
-// Obtener un producto por ID
 router.get("/productos/:id", BodegaController.getProductoById);
-
-// Eliminar un producto de bodega
 router.delete("/productos/:id", BodegaController.deleteProducto);
-
-// Actualizar stock de un producto en una bodega específica
 router.patch("/productos/:id/stock", BodegaController.updateStock);
 
 // Transferir producto a otra bodega
 router.post("/transferir", BodegaController.transferirProducto);
-
-// Obtener ubicaciones (con filtro por bodega opcional)
-router.get("/ubicaciones", BodegaController.getUbicaciones);
-
-// Obtener categorías
-router.get("/categorias", BodegaController.getCategorias);
 
 // ============================================
 // RUTAS CON PARÁMETROS DINÁMICOS (DEBEN IR AL FINAL)

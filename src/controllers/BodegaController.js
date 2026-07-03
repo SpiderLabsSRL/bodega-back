@@ -16,6 +16,16 @@ const BodegaController = {
     }
   },
 
+  getTodasBodegas: async (req, res) => {
+    try {
+      const bodegas = await BodegaService.getTodasBodegas();
+      res.json(bodegas);
+    } catch (error) {
+      console.error("Error en getTodasBodegas:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
   getBodegasActivas: async (req, res) => {
     try {
       const bodegas = await BodegaService.getBodegasActivas();
@@ -65,6 +75,11 @@ const BodegaController = {
     try {
       const { id } = req.params;
       const { nombre, tipo, direccion, telefono, estado } = req.body;
+      
+      if (!nombre && tipo === undefined && !direccion && !telefono && estado === undefined) {
+        return res.status(400).json({ error: "Debe proporcionar al menos un campo para actualizar" });
+      }
+      
       const bodega = await BodegaService.updateBodega(id, {
         nombre,
         tipo,
@@ -72,6 +87,7 @@ const BodegaController = {
         telefono,
         estado,
       });
+      
       if (!bodega) {
         return res.status(404).json({ error: "Bodega no encontrada" });
       }
@@ -93,6 +109,131 @@ const BodegaController = {
       res.json(bodega);
     } catch (error) {
       console.error("Error en updateBodegaEstado:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  // ============================================
+  // CONTROLADORES PARA UBICACIONES
+  // ============================================
+
+  getUbicaciones: async (req, res) => {
+    try {
+      const { bodega } = req.query;
+      const ubicaciones = await BodegaService.getUbicaciones(bodega);
+      res.json(ubicaciones);
+    } catch (error) {
+      console.error("Error en getUbicaciones:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  createUbicacion: async (req, res) => {
+    try {
+      const { nombre, idbodega } = req.body;
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      const ubicacion = await BodegaService.createUbicacion({
+        nombre: nombre.trim(),
+        idbodega: idbodega || null,
+      });
+      res.status(201).json(ubicacion);
+    } catch (error) {
+      console.error("Error en createUbicacion:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  updateUbicacion: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { nombre, idbodega } = req.body;
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      const ubicacion = await BodegaService.updateUbicacion(id, {
+        nombre: nombre.trim(),
+        idbodega: idbodega || null,
+      });
+      if (!ubicacion) {
+        return res.status(404).json({ error: "Ubicación no encontrada" });
+      }
+      res.json(ubicacion);
+    } catch (error) {
+      console.error("Error en updateUbicacion:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  deleteUbicacion: async (req, res) => {
+    try {
+      const { id } = req.params;
+      await BodegaService.deleteUbicacion(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error en deleteUbicacion:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  // ============================================
+  // CONTROLADORES PARA CATEGORÍAS
+  // ============================================
+
+  getCategorias: async (req, res) => {
+    try {
+      const categorias = await BodegaService.getCategorias();
+      res.json(categorias);
+    } catch (error) {
+      console.error("Error en getCategorias:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  createCategoria: async (req, res) => {
+    try {
+      const { nombre } = req.body;
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      const categoria = await BodegaService.createCategoria({
+        nombre: nombre.trim(),
+      });
+      res.status(201).json(categoria);
+    } catch (error) {
+      console.error("Error en createCategoria:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  updateCategoria: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { nombre } = req.body;
+      if (!nombre || !nombre.trim()) {
+        return res.status(400).json({ error: "El nombre es obligatorio" });
+      }
+      const categoria = await BodegaService.updateCategoria(id, {
+        nombre: nombre.trim(),
+      });
+      if (!categoria) {
+        return res.status(404).json({ error: "Categoría no encontrada" });
+      }
+      res.json(categoria);
+    } catch (error) {
+      console.error("Error en updateCategoria:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  deleteCategoria: async (req, res) => {
+    try {
+      const { id } = req.params;
+      await BodegaService.deleteCategoria(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error en deleteCategoria:", error);
       res.status(500).json({ error: error.message });
     }
   },
@@ -302,31 +443,6 @@ const BodegaController = {
       res.json(result);
     } catch (error) {
       console.error("Error en transferirProducto:", error);
-      res.status(500).json({ error: error.message });
-    }
-  },
-
-  // ============================================
-  // CONTROLADORES PARA DATOS MAESTROS
-  // ============================================
-
-  getUbicaciones: async (req, res) => {
-    try {
-      const { bodega } = req.query;
-      const ubicaciones = await BodegaService.getUbicaciones(bodega);
-      res.json(ubicaciones);
-    } catch (error) {
-      console.error("Error en getUbicaciones:", error);
-      res.status(500).json({ error: error.message });
-    }
-  },
-
-  getCategorias: async (req, res) => {
-    try {
-      const categorias = await BodegaService.getCategorias();
-      res.json(categorias);
-    } catch (error) {
-      console.error("Error en getCategorias:", error);
       res.status(500).json({ error: error.message });
     }
   },

@@ -15,6 +15,15 @@ const BodegaService = {
     return result.rows;
   },
 
+  getTodasBodegas: async () => {
+    const result = await query(
+      `SELECT idbodega, nombre, tipo, direccion, telefono, estado 
+       FROM bodegas 
+       ORDER BY nombre`
+    );
+    return result.rows;
+  },
+
   getBodegasActivas: async () => {
     const result = await query(
       `SELECT idbodega, nombre, tipo, direccion, telefono, estado 
@@ -48,13 +57,36 @@ const BodegaService = {
 
   updateBodega: async (id, data) => {
     const { nombre, tipo, direccion, telefono, estado } = data;
+    
+    const currentResult = await query(
+      `SELECT idbodega, nombre, tipo, direccion, telefono, estado FROM bodegas WHERE idbodega = $1`,
+      [id]
+    );
+    
+    if (currentResult.rows.length === 0) {
+      throw new Error("Bodega no encontrada");
+    }
+    
+    const current = currentResult.rows[0];
+    
+    const finalNombre = nombre !== undefined ? nombre : current.nombre;
+    const finalTipo = tipo !== undefined ? tipo : current.tipo;
+    const finalDireccion = direccion !== undefined ? direccion : current.direccion;
+    const finalTelefono = telefono !== undefined ? telefono : current.telefono;
+    const finalEstado = estado !== undefined ? estado : current.estado;
+    
+    if (finalTipo && !['Principal', 'Sucursal'].includes(finalTipo)) {
+      throw new Error("Tipo de bodega inválido. Debe ser 'Principal' o 'Sucursal'");
+    }
+    
     const result = await query(
       `UPDATE bodegas 
        SET nombre = $1, tipo = $2, direccion = $3, telefono = $4, estado = $5 
        WHERE idbodega = $6 
        RETURNING idbodega, nombre, tipo, direccion, telefono, estado`,
-      [nombre, tipo, direccion, telefono, estado, id]
+      [finalNombre, finalTipo, finalDireccion, finalTelefono, finalEstado, id]
     );
+    
     return result.rows[0];
   },
 
@@ -67,6 +99,121 @@ const BodegaService = {
       [estado, id]
     );
     return result.rows[0];
+  },
+
+  // ============================================
+  // FUNCIONES PARA UBICACIONES
+  // ============================================
+
+  getUbicaciones: async (idbodega = null) => {
+    let queryText = `SELECT idubicacion, nombre, estado, idbodega FROM ubicaciones WHERE estado = 0`;
+    const params = [];
+    
+    if (idbodega) {
+      queryText += ` AND idbodega = $1`;
+      params.push(idbodega);
+    }
+    
+    queryText += ` ORDER BY nombre`;
+    const result = await query(queryText, params);
+    return result.rows;
+  },
+
+  createUbicacion: async (data) => {
+    const { nombre, idbodega } = data;
+    const result = await query(
+      `INSERT INTO ubicaciones (nombre, idbodega, estado) 
+       VALUES ($1, $2, 0) 
+       RETURNING idubicacion, nombre, estado, idbodega`,
+      [nombre, idbodega || null]
+    );
+    return result.rows[0];
+  },
+
+  updateUbicacion: async (id, data) => {
+    const { nombre, idbodega } = data;
+    const result = await query(
+      `UPDATE ubicaciones 
+       SET nombre = $1, idbodega = $2
+       WHERE idubicacion = $3 AND estado = 0
+       RETURNING idubicacion, nombre, estado, idbodega`,
+      [nombre, idbodega || null, id]
+    );
+    return result.rows[0];
+  },
+
+  deleteUbicacion: async (id) => {
+    const checkResult = await query(
+      `SELECT COUNT(*) as count FROM productos WHERE idubicacion = $1 AND estado = 0`,
+      [id]
+    );
+    
+    if (parseInt(checkResult.rows[0].count) > 0) {
+      throw new Error("No se puede eliminar la ubicación porque está siendo usada por productos");
+    }
+    
+    const result = await query(
+      `UPDATE ubicaciones SET estado = 2 WHERE idubicacion = $1 RETURNING idubicacion`,
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      throw new Error("Ubicación no encontrada");
+    }
+  },
+
+  // ============================================
+  // FUNCIONES PARA CATEGORÍAS
+  // ============================================
+
+  getCategorias: async () => {
+    const result = await query(
+      `SELECT idcategoria, nombre, estado FROM categorias WHERE estado = 0 ORDER BY nombre`
+    );
+    return result.rows;
+  },
+
+  createCategoria: async (data) => {
+    const { nombre } = data;
+    const result = await query(
+      `INSERT INTO categorias (nombre, estado) 
+       VALUES ($1, 0) 
+       RETURNING idcategoria, nombre, estado`,
+      [nombre]
+    );
+    return result.rows[0];
+  },
+
+  updateCategoria: async (id, data) => {
+    const { nombre } = data;
+    const result = await query(
+      `UPDATE categorias 
+       SET nombre = $1
+       WHERE idcategoria = $2 AND estado = 0
+       RETURNING idcategoria, nombre, estado`,
+      [nombre, id]
+    );
+    return result.rows[0];
+  },
+
+  deleteCategoria: async (id) => {
+    const checkResult = await query(
+      `SELECT COUNT(*) as count FROM producto_categorias WHERE idcategoria = $1`,
+      [id]
+    );
+    
+    if (parseInt(checkResult.rows[0].count) > 0) {
+      throw new Error("No se puede eliminar la categoría porque está siendo usada por productos");
+    }
+    
+    const result = await query(
+      `UPDATE categorias SET estado = 2 WHERE idcategoria = $1 RETURNING idcategoria`,
+      [id]
+    );
+    
+    if (result.rows.length === 0) {
+      throw new Error("Categoría no encontrada");
+    }
   },
 
   // ============================================
@@ -727,31 +874,6 @@ const BodegaService = {
     } finally {
       client.release();
     }
-  },
-
-  // ============================================
-  // FUNCIONES PARA DATOS MAESTROS
-  // ============================================
-
-  getUbicaciones: async (idbodega = null) => {
-    let queryText = `SELECT idubicacion, nombre, estado, idbodega FROM ubicaciones WHERE estado = 0`;
-    const params = [];
-    
-    if (idbodega) {
-      queryText += ` AND idbodega = $1`;
-      params.push(idbodega);
-    }
-    
-    queryText += ` ORDER BY nombre`;
-    const result = await query(queryText, params);
-    return result.rows;
-  },
-
-  getCategorias: async () => {
-    const result = await query(
-      `SELECT idcategoria, nombre, estado FROM categorias WHERE estado = 0 ORDER BY nombre`
-    );
-    return result.rows;
   },
 };
 
