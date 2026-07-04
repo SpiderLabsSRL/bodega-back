@@ -55,12 +55,15 @@ exports.obtenerPagosPendientes = async (idusuario = null, idbodega = null, rol =
     const params = [];
     let paramCount = 1;
     
+    // Si NO es Admin, filtrar por usuario (solo ve sus propias cotizaciones)
     if (rol && rol !== 'Admin') {
       sql += ` AND c.idusuario = $${paramCount}`;
       params.push(idusuario);
       paramCount++;
     }
     
+    // Si es Admin Y se especifica una bodega, filtrar por esa bodega
+    // Si es Admin y NO se especifica bodega, NO filtrar (ver todas)
     if (rol && rol === 'Admin' && idbodega) {
       sql += ` AND c.idbodega = $${paramCount}`;
       params.push(idbodega);
@@ -117,9 +120,7 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
       [nuevoSaldo, nuevoAbono, idcotizacion]
     );
 
-    // Registrar transacción en caja sin validar si está abierta
     if (metodoPago === 'efectivo') {
-      // Buscar caja abierta, si no existe crear una
       let estadoCajaResult = await client.query(
         `SELECT idestado_caja, estado, monto_final
          FROM estado_caja 
@@ -129,7 +130,6 @@ exports.procesarPagoCotizacion = async ({ idcotizacion, monto, metodoPago, idusu
         [idusuario, idbodega]
       );
 
-      // Si no hay caja abierta, crear una automáticamente
       if (estadoCajaResult.rows.length === 0) {
         console.log('⚠️ No hay caja abierta. Creando caja automática...');
         
@@ -223,7 +223,6 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
     const itemsVenta = [];
     const descripcionItems = [];
 
-    // 1. Procesar entregas de productos
     for (const producto of productos) {
       const { idproducto, cantidadEntregada } = producto;
 
@@ -297,7 +296,6 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
         );
       }
 
-      // Actualizar stock
       const cantidad = parseInt(cantidadEntregada) || 0;
       
       if (cantidad > 0) {
@@ -370,9 +368,7 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
         console.log('✅ Detalles de venta insertados:', itemsVenta.length, 'items');
       }
 
-      // Registrar en caja sin validar si está abierta
       if (metodoPago === 'efectivo' && montoPago > 0) {
-        // Buscar caja abierta, si no existe crear una
         let estadoCajaResult = await client.query(
           `SELECT idestado_caja, estado, monto_final
            FROM estado_caja 
@@ -382,7 +378,6 @@ exports.actualizarEntregasProductos = async ({ idcotizacion, productos, montoPag
           [idusuario, idbodega]
         );
 
-        // Si no hay caja abierta, crear una automáticamente
         if (estadoCajaResult.rows.length === 0) {
           console.log('⚠️ No hay caja abierta. Creando caja automática...');
           
