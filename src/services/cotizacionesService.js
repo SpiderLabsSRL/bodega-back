@@ -1,6 +1,7 @@
 const { query, pool } = require("../../db");
 
 const cotizacionesService = {
+  // Crear cotización
   createCotizacion: async (cotizacionData) => {
     const client = await pool.connect();
     
@@ -9,34 +10,11 @@ const cotizacionesService = {
       
       console.log("📝 Creando cotización con datos:", cotizacionData);
       
-      // Obtener idbodega de los datos o usar 1 por defecto
-      let idbodega = cotizacionData.idbodega || 1;
-      
-      // Si viene idusuario, verificar su bodega
+      // Obtener idusuario de los datos
       let idusuario = cotizacionData.idusuario;
       
-      if (idusuario) {
-        // Verificar que el usuario existe y obtener su bodega si no se especificó
-        const usuarioSql = 'SELECT idusuario, idbodega FROM usuarios WHERE idusuario = $1 AND estado = 0';
-        const usuarioResult = await client.query(usuarioSql, [idusuario]);
-        
-        if (usuarioResult.rows.length === 0) {
-          throw new Error("Usuario no válido o inactivo");
-        }
-        
-        // Si no se especificó bodega, usar la del usuario
-        if (!cotizacionData.idbodega) {
-          const bodegaUsuario = usuarioResult.rows[0].idbodega;
-          if (bodegaUsuario) {
-            idbodega = bodegaUsuario;
-            console.log("📦 Usando bodega del usuario:", idbodega);
-          } else {
-            console.warn("⚠️ Usuario sin bodega asignada, usando bodega por defecto (1)");
-            idbodega = 1;
-          }
-        }
-      } else {
-        // Si no hay idusuario, obtener el primer usuario activo
+      // Si no viene idusuario, intentar obtenerlo
+      if (!idusuario) {
         const usuarioSql = 'SELECT idusuario FROM usuarios WHERE estado = 0 LIMIT 1';
         const usuarioResult = await client.query(usuarioSql);
         
@@ -46,9 +24,43 @@ const cotizacionesService = {
         
         idusuario = usuarioResult.rows[0].idusuario;
         console.log("👤 Usuario asignado automáticamente:", idusuario);
+      } else {
+        // Verificar que el usuario existe y está activo
+        const usuarioCheck = await client.query(
+          'SELECT idusuario, idbodega FROM usuarios WHERE idusuario = $1 AND estado = 0',
+          [idusuario]
+        );
+        
+        if (usuarioCheck.rows.length === 0) {
+          throw new Error("Usuario no válido o inactivo");
+        }
+        
+        console.log("👤 Usuario verificado:", idusuario);
+      }
+      
+      // Obtener bodega del usuario o usar la proporcionada
+      let idbodega = cotizacionData.idbodega;
+      
+      if (!idbodega) {
+        // Si no se especificó bodega, obtener la del usuario
+        const bodegaResult = await client.query(
+          'SELECT idbodega FROM usuarios WHERE idusuario = $1',
+          [idusuario]
+        );
+        
+        if (bodegaResult.rows.length > 0 && bodegaResult.rows[0].idbodega) {
+          idbodega = bodegaResult.rows[0].idbodega;
+        } else {
+          // Si el usuario no tiene bodega, usar la primera disponible
+          const defaultBodega = await client.query(
+            'SELECT idbodega FROM bodegas WHERE estado = 0 ORDER BY idbodega LIMIT 1'
+          );
+          idbodega = defaultBodega.rows.length > 0 ? defaultBodega.rows[0].idbodega : 1;
+        }
       }
       
       console.log("🏢 Bodega final para cotización:", idbodega);
+      console.log("👤 Usuario final:", idusuario);
       
       // Buscar o crear cliente
       let idcliente = null;
@@ -70,54 +82,22 @@ const cotizacionesService = {
         ]);
         
         if (searchResult.rows.length > 0) {
-          // Cliente existente
           idcliente = searchResult.rows[0].idcliente;
           console.log("✅ Cliente encontrado:", idcliente);
-        } else if (cotizacionData.guardar_cliente !== false) {
-          // Crear nuevo cliente si no existe y se solicita guardar
-          // Intentar buscar por carnet si existe
-          if (cotizacionData.carnet) {
-            const carnetCheck = await client.query(
-              'SELECT idcliente FROM clientes WHERE carnet = $1 AND estado = 0',
-              [cotizacionData.carnet]
-            );
-            if (carnetCheck.rows.length > 0) {
-              idcliente = carnetCheck.rows[0].idcliente;
-              console.log("✅ Cliente encontrado por carnet:", idcliente);
-            }
-          }
-          
-          // Si no se encontró por carnet, crear nuevo cliente
-          if (!idcliente) {
-            const nombresParts = cotizacionData.cliente_nombre.trim().split(' ');
-            const nombres = nombresParts.length > 0 ? nombresParts[0] : cotizacionData.cliente_nombre;
-            const apellidos = nombresParts.length > 1 ? nombresParts.slice(1).join(' ') : '';
-            
-            // Generar carnet único si no se proporciona
-            const carnet = cotizacionData.carnet || `TEMP_${Date.now()}`;
-            
-            const insertClienteSql = `
-              INSERT INTO clientes (
-                nombres, apellidos, carnet, celular, nota, estado
-              ) VALUES ($1, $2, $3, $4, $5, 0)
-              RETURNING idcliente
-            `;
-            
-            const clienteResult = await client.query(insertClienteSql, [
-              nombres,
-              apellidos,
-              carnet,
-              cotizacionData.cliente_telefono || '',
-              cotizacionData.cliente_nota || '',
-            ]);
-            
-            idcliente = clienteResult.rows[0].idcliente;
-            console.log("✅ Nuevo cliente creado:", idcliente);
+        } else if (cotizacionData.carnet) {
+          // Intentar buscar por carnet
+          const carnetCheck = await client.query(
+            'SELECT idcliente FROM clientes WHERE carnet = $1 AND estado = 0',
+            [cotizacionData.carnet]
+          );
+          if (carnetCheck.rows.length > 0) {
+            idcliente = carnetCheck.rows[0].idcliente;
+            console.log("✅ Cliente encontrado por carnet:", idcliente);
           }
         }
       }
       
-      // Insertar cotización con idbodega y idcliente
+      // Insertar cotización
       const insertCotizacionSql = `
         INSERT INTO cotizaciones (
           vigencia, cliente_nombre, cliente_telefono, cliente_direccion,
@@ -196,6 +176,7 @@ const cotizacionesService = {
     }
   },
 
+  // Obtener todas las cotizaciones
   getCotizaciones: async () => {
     try {
       const sql = `
@@ -218,11 +199,12 @@ const cotizacionesService = {
       const result = await query(sql);
       return result.rows;
     } catch (error) {
-      console.error("Error en getCotizaciones:", error);
+      console.error("❌ Error en getCotizaciones:", error);
       throw error;
     }
   },
 
+  // Obtener cotización por ID
   getCotizacionById: async (id) => {
     try {
       const cotizacionSql = `
@@ -265,11 +247,12 @@ const cotizacionesService = {
         detalles: detallesResult.rows
       };
     } catch (error) {
-      console.error("Error en getCotizacionById:", error);
+      console.error("❌ Error en getCotizacionById:", error);
       throw error;
     }
   },
 
+  // Actualizar cotización
   updateCotizacion: async (id, updateData) => {
     try {
       const fields = [];
@@ -300,11 +283,12 @@ const cotizacionesService = {
       const result = await query(updateSql, values);
       return result.rows.length > 0 ? result.rows[0] : null;
     } catch (error) {
-      console.error("Error en updateCotizacion:", error);
+      console.error("❌ Error en updateCotizacion:", error);
       throw error;
     }
   },
 
+  // Eliminar cotización (soft delete)
   deleteCotizacion: async (id) => {
     try {
       const sql = `
@@ -315,11 +299,12 @@ const cotizacionesService = {
       
       await query(sql, [id]);
     } catch (error) {
-      console.error("Error en deleteCotizacion:", error);
+      console.error("❌ Error en deleteCotizacion:", error);
       throw error;
     }
   },
 
+  // Buscar cotizaciones
   searchCotizaciones: async (searchQuery) => {
     try {
       console.log("🔍 Buscando cotizaciones con query:", searchQuery);
@@ -364,7 +349,7 @@ const cotizacionesService = {
       console.error("❌ Error en searchCotizaciones service:", error);
       return [];
     }
-  },
+  }
 };
 
 module.exports = cotizacionesService;

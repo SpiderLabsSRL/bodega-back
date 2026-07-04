@@ -4,6 +4,8 @@ const cotizacionesController = {
   // Crear cotización
   createCotizacion: async (req, res) => {
     try {
+      console.log("📝 Creando cotización - Body:", req.body);
+      
       const {
         vigencia,
         cliente_nombre,
@@ -15,7 +17,11 @@ const cotizacionesController = {
         total,
         abono,
         saldo,
-        items
+        items,
+        idbodega,
+        idusuario,
+        carnet,
+        cliente_nota
       } = req.body;
 
       // Validaciones básicas
@@ -43,13 +49,17 @@ const cotizacionesController = {
         total,
         abono,
         saldo,
-        items
+        items,
+        idbodega,
+        idusuario,
+        carnet,
+        cliente_nota
       };
 
       const nuevaCotizacion = await cotizacionesService.createCotizacion(cotizacionData);
       res.status(201).json(nuevaCotizacion);
     } catch (error) {
-      console.error("Error en createCotizacion:", error);
+      console.error("❌ Error en createCotizacion:", error);
       res.status(500).json({ 
         error: "Error al crear cotización", 
         details: error.message 
@@ -63,7 +73,7 @@ const cotizacionesController = {
       const cotizaciones = await cotizacionesService.getCotizaciones();
       res.json(cotizaciones);
     } catch (error) {
-      console.error("Error en getCotizaciones:", error);
+      console.error("❌ Error en getCotizaciones:", error);
       res.status(500).json({ 
         error: "Error al obtener cotizaciones", 
         details: error.message 
@@ -83,7 +93,7 @@ const cotizacionesController = {
       
       res.json(cotizacion);
     } catch (error) {
-      console.error("Error en getCotizacionById:", error);
+      console.error("❌ Error en getCotizacionById:", error);
       res.status(500).json({ 
         error: "Error al obtener cotización", 
         details: error.message 
@@ -97,7 +107,10 @@ const cotizacionesController = {
       const { id } = req.params;
       const updateData = req.body;
 
-      const cotizacionActualizada = await cotizacionesService.updateCotizacion(parseInt(id), updateData);
+      const cotizacionActualizada = await cotizacionesService.updateCotizacion(
+        parseInt(id), 
+        updateData
+      );
       
       if (!cotizacionActualizada) {
         return res.status(404).json({ error: "Cotización no encontrada" });
@@ -105,7 +118,7 @@ const cotizacionesController = {
       
       res.json(cotizacionActualizada);
     } catch (error) {
-      console.error("Error en updateCotizacion:", error);
+      console.error("❌ Error en updateCotizacion:", error);
       res.status(500).json({ 
         error: "Error al actualizar cotización", 
         details: error.message 
@@ -120,32 +133,34 @@ const cotizacionesController = {
       await cotizacionesService.deleteCotizacion(parseInt(id));
       res.json({ message: "Cotización eliminada correctamente" });
     } catch (error) {
-      console.error("Error en deleteCotizacion:", error);
+      console.error("❌ Error en deleteCotizacion:", error);
       res.status(500).json({ 
         error: "Error al eliminar cotización", 
         details: error.message 
       });
     }
   },
+
+  // Buscar cotizaciones
   searchCotizaciones: async (req, res) => {
-  try {
-    console.log("🔍 SEARCH COTIZACIONES EJECUTADO");
-    console.log("Query recibido:", req.query.q);
-    
-    const { q } = req.query;
-    
-    if (!q || q.trim() === "") {
-      return res.json([]);
+    try {
+      console.log("🔍 SEARCH COTIZACIONES EJECUTADO");
+      console.log("Query recibido:", req.query.q);
+      
+      const { q } = req.query;
+      
+      if (!q || q.trim() === "") {
+        return res.json([]);
+      }
+      
+      const cotizaciones = await cotizacionesService.searchCotizaciones(q.trim());
+      console.log("Resultados encontrados:", cotizaciones.length);
+      res.json(cotizaciones);
+    } catch (error) {
+      console.error("❌ Error en searchCotizaciones controller:", error);
+      res.json([]);
     }
-    
-    const cotizaciones = await cotizacionesService.searchCotizaciones(q.trim());
-    console.log("Resultados encontrados:", cotizaciones.length);
-    res.json(cotizaciones);
-  } catch (error) {
-    console.error("Error en searchCotizaciones controller:", error);
-    res.json([]);
   }
-  },
 };
 
 module.exports = cotizacionesController;

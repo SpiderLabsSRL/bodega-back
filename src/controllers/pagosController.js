@@ -18,12 +18,31 @@ exports.getPagosPendientes = async (req, res) => {
 
     // IMPORTANTE: Usar los campos correctos según tu middleware
     // El middleware usa 'id' no 'idUsuario'
-    const idusuario = usuario.id;  // <- Cambiado de idUsuario a id
+    const idusuario = usuario.id;
     const rol = usuario.rol;
-    // Si es Admin y viene en query, usar ese, sino usar el de la bodega del usuario
-    const idbodega = req.query.bodega || usuario.idbodega;
+    
+    // Para admin: puede ver todas las bodegas o filtrar por una específica
+    // Para no-admin: solo ve su propia bodega
+    let idbodega = null;
+    
+    if (rol === 'Admin') {
+      // Si el admin especifica una bodega en query, usar esa
+      if (req.query.bodega) {
+        idbodega = parseInt(req.query.bodega);
+      }
+      // Si no, puede ver todas (null)
+    } else {
+      // No-admin: forzar su bodega
+      idbodega = usuario.idbodega;
+      if (!idbodega) {
+        console.error("❌ Usuario no-admin sin bodega asignada");
+        return res.status(400).json({ 
+          error: "Usuario no tiene bodega asignada" 
+        });
+      }
+    }
 
-    console.log("👤 Usuario autenticado - ID:", idusuario, "Rol:", rol, "Bodega:", idbodega);
+    console.log("👤 Usuario autenticado - ID:", idusuario, "Rol:", rol, "Bodega filtro:", idbodega);
 
     if (!idusuario) {
       console.error("❌ No se pudo obtener el ID del usuario");
