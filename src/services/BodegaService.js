@@ -143,15 +143,6 @@ const BodegaService = {
   },
 
   deleteUbicacion: async (id) => {
-    const checkResult = await query(
-      `SELECT COUNT(*) as count FROM productos WHERE idubicacion = $1 AND estado = 0`,
-      [id]
-    );
-    
-    if (parseInt(checkResult.rows[0].count) > 0) {
-      throw new Error("No se puede eliminar la ubicación porque está siendo usada por productos");
-    }
-    
     const result = await query(
       `UPDATE ubicaciones SET estado = 2 WHERE idubicacion = $1 RETURNING idubicacion`,
       [id]
@@ -197,15 +188,6 @@ const BodegaService = {
   },
 
   deleteCategoria: async (id) => {
-    const checkResult = await query(
-      `SELECT COUNT(*) as count FROM producto_categorias WHERE idcategoria = $1`,
-      [id]
-    );
-    
-    if (parseInt(checkResult.rows[0].count) > 0) {
-      throw new Error("No se puede eliminar la categoría porque está siendo usada por productos");
-    }
-    
     const result = await query(
       `UPDATE categorias SET estado = 2 WHERE idcategoria = $1 RETURNING idcategoria`,
       [id]
@@ -227,13 +209,23 @@ const BodegaService = {
          p.nombre,
          p.descripcion,
          p.estado,
-         p.idubicacion,
-         u.nombre as ubicacion_nombre,
+         COALESCE(
+           (SELECT json_agg(
+             json_build_object(
+               'idubicacion', u.idubicacion,
+               'nombre', u.nombre,
+               'idbodega', u.idbodega
+             )
+           ) FROM producto_ubicacion_bodega pub
+           JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
+           WHERE pub.idproducto = p.idproducto AND pub.idbodega = $1 AND u.estado = 0),
+           '[]'
+         ) as ubicaciones,
          COALESCE(
            (SELECT json_agg(c.nombre) 
             FROM producto_categorias pc 
             JOIN categorias c ON pc.idcategoria = c.idcategoria 
-            WHERE pc.idproducto = p.idproducto),
+            WHERE pc.idproducto = p.idproducto AND c.estado = 0),
            '[]'
          ) as categorias,
          p.imagen,
@@ -256,7 +248,6 @@ const BodegaService = {
            '[]'
          ) as productos_similares
        FROM productos p
-       LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
        LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto AND pb.idbodega = $1
        LEFT JOIN bodegas b ON pb.idbodega = b.idbodega
        WHERE p.estado = 0
@@ -273,13 +264,23 @@ const BodegaService = {
          p.nombre,
          p.descripcion,
          p.estado,
-         p.idubicacion,
-         u.nombre as ubicacion_nombre,
+         COALESCE(
+           (SELECT json_agg(
+             json_build_object(
+               'idubicacion', u.idubicacion,
+               'nombre', u.nombre,
+               'idbodega', u.idbodega
+             )
+           ) FROM producto_ubicacion_bodega pub
+           JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
+           WHERE pub.idproducto = p.idproducto AND u.estado = 0),
+           '[]'
+         ) as ubicaciones,
          COALESCE(
            (SELECT json_agg(c.nombre) 
             FROM producto_categorias pc 
             JOIN categorias c ON pc.idcategoria = c.idcategoria 
-            WHERE pc.idproducto = p.idproducto),
+            WHERE pc.idproducto = p.idproducto AND c.estado = 0),
            '[]'
          ) as categorias,
          p.imagen,
@@ -311,7 +312,6 @@ const BodegaService = {
            '[]'
          ) as productos_similares
        FROM productos p
-       LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
        WHERE p.estado = 0
        ORDER BY p.nombre`
     );
@@ -325,13 +325,23 @@ const BodegaService = {
         p.nombre,
         p.descripcion,
         p.estado,
-        p.idubicacion,
-        u.nombre as ubicacion_nombre,
+        COALESCE(
+          (SELECT json_agg(
+            json_build_object(
+              'idubicacion', u.idubicacion,
+              'nombre', u.nombre,
+              'idbodega', u.idbodega
+            )
+          ) FROM producto_ubicacion_bodega pub
+          JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
+          WHERE pub.idproducto = p.idproducto AND u.estado = 0),
+          '[]'
+        ) as ubicaciones,
         COALESCE(
           (SELECT json_agg(c.nombre) 
            FROM producto_categorias pc 
            JOIN categorias c ON pc.idcategoria = c.idcategoria 
-           WHERE pc.idproducto = p.idproducto),
+           WHERE pc.idproducto = p.idproducto AND c.estado = 0),
           '[]'
         ) as categorias,
         p.imagen,
@@ -354,7 +364,6 @@ const BodegaService = {
           '[]'
         ) as productos_similares
       FROM productos p
-      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
       LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto
       LEFT JOIN bodegas b ON pb.idbodega = b.idbodega
       WHERE p.estado = 0
@@ -364,7 +373,7 @@ const BodegaService = {
           EXISTS (
             SELECT 1 FROM producto_categorias pc 
             JOIN categorias c ON pc.idcategoria = c.idcategoria 
-            WHERE pc.idproducto = p.idproducto AND c.nombre ILIKE $1
+            WHERE pc.idproducto = p.idproducto AND c.nombre ILIKE $1 AND c.estado = 0
           )
         )
     `;
@@ -387,13 +396,23 @@ const BodegaService = {
          p.nombre,
          p.descripcion,
          p.estado,
-         p.idubicacion,
-         u.nombre as ubicacion_nombre,
+         COALESCE(
+           (SELECT json_agg(
+             json_build_object(
+               'idubicacion', u.idubicacion,
+               'nombre', u.nombre,
+               'idbodega', u.idbodega
+             )
+           ) FROM producto_ubicacion_bodega pub
+           JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
+           WHERE pub.idproducto = p.idproducto AND u.estado = 0),
+           '[]'
+         ) as ubicaciones,
          COALESCE(
            (SELECT json_agg(c.nombre) 
             FROM producto_categorias pc 
             JOIN categorias c ON pc.idcategoria = c.idcategoria 
-            WHERE pc.idproducto = p.idproducto),
+            WHERE pc.idproducto = p.idproducto AND c.estado = 0),
            '[]'
          ) as categorias,
          p.imagen,
@@ -425,12 +444,103 @@ const BodegaService = {
            '[]'
          ) as productos_similares
        FROM productos p
-       LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
        WHERE p.idproducto = $1 AND p.estado = 0`,
       [id]
     );
     return result.rows[0];
   },
+
+  // ============================================
+  // FUNCIONES PARA PRODUCTO_UBICACION_BODEGA
+  // ============================================
+
+  getUbicacionesByProductoBodega: async (idproducto, idbodega) => {
+    const result = await query(
+      `SELECT u.idubicacion, u.nombre, u.estado, u.idbodega
+       FROM producto_ubicacion_bodega pub
+       JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
+       WHERE pub.idproducto = $1 AND pub.idbodega = $2 AND u.estado = 0
+       ORDER BY u.nombre`,
+      [idproducto, idbodega]
+    );
+    return result.rows;
+  },
+
+  asignarUbicacionProductoBodega: async (idproducto, idbodega, idubicacion) => {
+    // Verificar que la ubicación existe y está activa
+    const ubicacionResult = await query(
+      `SELECT idubicacion FROM ubicaciones WHERE idubicacion = $1 AND estado = 0`,
+      [idubicacion]
+    );
+    if (ubicacionResult.rows.length === 0) {
+      throw new Error("Ubicación no encontrada o inactiva");
+    }
+
+    // Verificar que el producto existe
+    const productoResult = await query(
+      `SELECT idproducto FROM productos WHERE idproducto = $1 AND estado = 0`,
+      [idproducto]
+    );
+    if (productoResult.rows.length === 0) {
+      throw new Error("Producto no encontrado");
+    }
+
+    // Verificar que la bodega existe
+    const bodegaResult = await query(
+      `SELECT idbodega FROM bodegas WHERE idbodega = $1 AND estado = 0`,
+      [idbodega]
+    );
+    if (bodegaResult.rows.length === 0) {
+      throw new Error("Bodega no encontrada o inactiva");
+    }
+
+    // Verificar que el producto existe en la bodega
+    const pbResult = await query(
+      `SELECT idproducto_bodega FROM producto_bodega WHERE idproducto = $1 AND idbodega = $2`,
+      [idproducto, idbodega]
+    );
+    if (pbResult.rows.length === 0) {
+      throw new Error("El producto no está registrado en esta bodega");
+    }
+
+    // Insertar la relación
+    const result = await query(
+      `INSERT INTO producto_ubicacion_bodega (idproducto, idbodega, idubicacion)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (idproducto, idbodega, idubicacion) DO NOTHING
+       RETURNING idproducto, idbodega, idubicacion`,
+      [idproducto, idbodega, idubicacion]
+    );
+
+    if (result.rows.length === 0) {
+      // Si no se insertó, es porque ya existía
+      return { 
+        idproducto, 
+        idbodega, 
+        idubicacion, 
+        message: "La ubicación ya estaba asignada a este producto en esta bodega" 
+      };
+    }
+
+    return result.rows[0];
+  },
+
+  eliminarUbicacionProductoBodega: async (idproducto, idbodega, idubicacion) => {
+    const result = await query(
+      `DELETE FROM producto_ubicacion_bodega 
+       WHERE idproducto = $1 AND idbodega = $2 AND idubicacion = $3
+       RETURNING idproducto`,
+      [idproducto, idbodega, idubicacion]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("No se encontró la relación producto-ubicación-bodega");
+    }
+  },
+
+  // ============================================
+  // FUNCIONES PARA CREAR/ACTUALIZAR PRODUCTOS
+  // ============================================
 
   createProducto: async (productoData, imagenFile) => {
     const client = await pool.connect();
@@ -450,7 +560,7 @@ const BodegaService = {
       const {
         nombre,
         descripcion,
-        idubicacion,
+        ubicaciones,
         categorias,
         precio_venta,
         precio_compra,
@@ -530,14 +640,13 @@ const BodegaService = {
       } else {
         const productoResult = await client.query(
           `INSERT INTO productos (
-            nombre, descripcion, idubicacion, imagen, precio_venta, 
+            nombre, descripcion, imagen, precio_venta, 
             precio_compra, codigo_barras, estado
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
+          ) VALUES ($1, $2, $3, $4, $5, $6, 0)
           RETURNING idproducto`,
           [
             nombre,
             descripcion || "",
-            idubicacion || 1,
             imagenBuffer,
             precio_venta || 0,
             precio_compra || 0,
@@ -561,10 +670,25 @@ const BodegaService = {
           [idproducto, bodegaId, stock || 0, stock_minimo || 0]
         );
 
+        // Asignar ubicaciones al producto en esta bodega
+        if (ubicaciones && Array.isArray(ubicaciones) && ubicaciones.length > 0) {
+          for (const ubicacionId of ubicaciones) {
+            const idUbicacion = typeof ubicacionId === 'string' ? parseInt(ubicacionId) : ubicacionId;
+            if (!isNaN(idUbicacion) && idUbicacion > 0) {
+              await client.query(
+                `INSERT INTO producto_ubicacion_bodega (idproducto, idbodega, idubicacion)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (idproducto, idbodega, idubicacion) DO NOTHING`,
+                [idproducto, bodegaId, idUbicacion]
+              );
+            }
+          }
+        }
+
         if (categorias && Array.isArray(categorias) && categorias.length > 0) {
           for (const categoria of categorias) {
             const idCategoria = typeof categoria === 'string' ? parseInt(categoria) : categoria;
-            if (!isNaN(idCategoria)) {
+            if (!isNaN(idCategoria) && idCategoria > 0) {
               await client.query(
                 "INSERT INTO producto_categorias (idproducto, idcategoria) VALUES ($1, $2)",
                 [idproducto, idCategoria]
@@ -621,7 +745,7 @@ const BodegaService = {
       }
 
       const productoActual = await client.query(
-        `SELECT nombre, descripcion, idubicacion, precio_venta, precio_compra, codigo_barras, imagen 
+        `SELECT nombre, descripcion, precio_venta, precio_compra, codigo_barras, imagen 
          FROM productos WHERE idproducto = $1`,
         [id]
       );
@@ -644,7 +768,7 @@ const BodegaService = {
       const {
         nombre,
         descripcion,
-        idubicacion,
+        ubicaciones,
         categorias,
         precio_venta,
         precio_compra,
@@ -667,7 +791,6 @@ const BodegaService = {
 
       const finalNombre = nombre || actual.nombre;
       const finalDescripcion = descripcion !== undefined && descripcion !== null ? descripcion : actual.descripcion;
-      const finalIdUbicacion = idubicacion || actual.idubicacion;
       const finalPrecioVenta = precio_venta !== undefined && precio_venta !== null ? precio_venta : parseFloat(actual.precio_venta);
       const finalPrecioCompra = precio_compra !== undefined && precio_compra !== null ? precio_compra : parseFloat(actual.precio_compra);
 
@@ -675,30 +798,29 @@ const BodegaService = {
         UPDATE productos SET 
           nombre = $1, 
           descripcion = $2, 
-          idubicacion = $3,
-          precio_venta = $4, 
-          precio_compra = $5,
-          codigo_barras = $6
+          precio_venta = $3, 
+          precio_compra = $4,
+          codigo_barras = $5
       `;
       const queryParams = [
         finalNombre,
         finalDescripcion || "",
-        finalIdUbicacion || 1,
         finalPrecioVenta || 0,
         finalPrecioCompra || 0,
         codigoBarrasFinal,
       ];
 
       if (imagenBuffer) {
-        updateQuery += `, imagen = $7 WHERE idproducto = $8`;
+        updateQuery += `, imagen = $6 WHERE idproducto = $7`;
         queryParams.push(imagenBuffer, id);
       } else {
-        updateQuery += ` WHERE idproducto = $7`;
+        updateQuery += ` WHERE idproducto = $6`;
         queryParams.push(id);
       }
 
       await client.query(updateQuery, queryParams);
 
+      // Actualizar stock en la bodega
       if (idbodega && stock !== undefined && stock !== null) {
         const existingInBodega = await client.query(
           `SELECT idproducto_bodega FROM producto_bodega 
@@ -725,6 +847,41 @@ const BodegaService = {
         }
       }
 
+      // Actualizar ubicaciones
+      if (ubicaciones && Array.isArray(ubicaciones)) {
+        // Eliminar ubicaciones existentes para esta bodega si se especificó idbodega
+        if (idbodega) {
+          await client.query(
+            `DELETE FROM producto_ubicacion_bodega 
+             WHERE idproducto = $1 AND idbodega = $2`,
+            [id, idbodega]
+          );
+        } else {
+          // Si no se especificó bodega, usar la bodega principal (1)
+          await client.query(
+            `DELETE FROM producto_ubicacion_bodega 
+             WHERE idproducto = $1 AND idbodega = $2`,
+            [id, 1]
+          );
+        }
+        
+        if (ubicaciones.length > 0) {
+          const bodegaParaUbicaciones = idbodega || 1;
+          for (const ubicacionId of ubicaciones) {
+            const idUbicacion = typeof ubicacionId === 'string' ? parseInt(ubicacionId) : ubicacionId;
+            if (!isNaN(idUbicacion) && idUbicacion > 0) {
+              await client.query(
+                `INSERT INTO producto_ubicacion_bodega (idproducto, idbodega, idubicacion)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (idproducto, idbodega, idubicacion) DO NOTHING`,
+                [id, bodegaParaUbicaciones, idUbicacion]
+              );
+            }
+          }
+        }
+      }
+
+      // Actualizar categorías
       if (categorias && Array.isArray(categorias)) {
         await client.query(
           "DELETE FROM producto_categorias WHERE idproducto = $1",
@@ -744,6 +901,7 @@ const BodegaService = {
         }
       }
 
+      // Actualizar productos similares
       if (productos_similares && Array.isArray(productos_similares)) {
         await client.query(
           "DELETE FROM productos_similares WHERE idproducto = $1 OR idproducto_similar = $1",
@@ -798,6 +956,10 @@ const BodegaService = {
     }
     return result.rows[0];
   },
+
+  // ============================================
+  // FUNCIONES PARA TRANSFERENCIAS
+  // ============================================
 
   transferirProducto: async (idproducto, idbodegaOrigen, idbodegaDestino, cantidad) => {
     const client = await pool.connect();
@@ -864,6 +1026,22 @@ const BodegaService = {
            VALUES ($1, $2, $3, $4)`,
           [idproducto, idbodegaDestino, cantidad, stockMinimo]
         );
+
+        // Copiar ubicaciones del producto al nuevo destino
+        const ubicacionesOrigen = await client.query(
+          `SELECT idubicacion FROM producto_ubicacion_bodega 
+           WHERE idproducto = $1 AND idbodega = $2`,
+          [idproducto, idbodegaOrigen]
+        );
+
+        for (const ubicacion of ubicacionesOrigen.rows) {
+          await client.query(
+            `INSERT INTO producto_ubicacion_bodega (idproducto, idbodega, idubicacion)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (idproducto, idbodega, idubicacion) DO NOTHING`,
+            [idproducto, idbodegaDestino, ubicacion.idubicacion]
+          );
+        }
       }
 
       await client.query("COMMIT");

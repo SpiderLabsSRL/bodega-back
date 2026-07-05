@@ -291,6 +291,47 @@ const BodegaController = {
     }
   },
 
+  // ============================================
+  // CONTROLADORES PARA PRODUCTO_UBICACION_BODEGA
+  // ============================================
+
+  getUbicacionesByProductoBodega: async (req, res) => {
+    try {
+      const { idproducto, idbodega } = req.params;
+      const ubicaciones = await BodegaService.getUbicacionesByProductoBodega(idproducto, idbodega);
+      res.json(ubicaciones);
+    } catch (error) {
+      console.error("Error en getUbicacionesByProductoBodega:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  asignarUbicacionProductoBodega: async (req, res) => {
+    try {
+      const { idproducto, idbodega, idubicacion } = req.body;
+      const result = await BodegaService.asignarUbicacionProductoBodega(idproducto, idbodega, idubicacion);
+      res.status(201).json(result);
+    } catch (error) {
+      console.error("Error en asignarUbicacionProductoBodega:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  eliminarUbicacionProductoBodega: async (req, res) => {
+    try {
+      const { idproducto, idbodega, idubicacion } = req.params;
+      await BodegaService.eliminarUbicacionProductoBodega(idproducto, idbodega, idubicacion);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error en eliminarUbicacionProductoBodega:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  // ============================================
+  // CONTROLADORES PARA CREAR/ACTUALIZAR PRODUCTOS
+  // ============================================
+
   createProducto: async (req, res) => {
     try {
       let categorias = [];
@@ -317,12 +358,24 @@ const BodegaController = {
         }
       }
 
+      // Obtener ubicaciones del producto
+      let ubicaciones = [];
+      if (req.body.ubicaciones) {
+        try {
+          ubicaciones = JSON.parse(req.body.ubicaciones);
+        } catch (e) {
+          if (Array.isArray(req.body.ubicaciones)) {
+            ubicaciones = req.body.ubicaciones;
+          }
+        }
+      }
+
       const idbodega = req.body.idbodega ? parseInt(req.body.idbodega) : 1;
 
       const productoData = {
         nombre: req.body.nombre,
         descripcion: req.body.descripcion || "",
-        idubicacion: parseInt(req.body.idubicacion) || 1,
+        ubicaciones: ubicaciones,
         categorias: categorias,
         precio_venta: parseFloat(req.body.precio_venta) || 0,
         precio_compra: parseFloat(req.body.precio_compra) || 0,
@@ -374,10 +427,22 @@ const BodegaController = {
         }
       }
 
+      // Obtener ubicaciones del producto
+      let ubicaciones = [];
+      if (req.body.ubicaciones) {
+        try {
+          ubicaciones = JSON.parse(req.body.ubicaciones);
+        } catch (e) {
+          if (Array.isArray(req.body.ubicaciones)) {
+            ubicaciones = req.body.ubicaciones;
+          }
+        }
+      }
+
       const productoData = {
         nombre: req.body.nombre,
         descripcion: req.body.descripcion || "",
-        idubicacion: parseInt(req.body.idubicacion) || 1,
+        ubicaciones: ubicaciones,
         categorias: categorias,
         precio_venta: parseFloat(req.body.precio_venta) || 0,
         precio_compra: parseFloat(req.body.precio_compra) || 0,

@@ -74,6 +74,22 @@ router.get("/productos/:id", BodegaController.getProductoById);
 router.delete("/productos/:id", BodegaController.deleteProducto);
 router.patch("/productos/:id/stock", BodegaController.updateStock);
 
+// ============================================
+// RUTAS PARA PRODUCTO_UBICACION_BODEGA
+// ============================================
+router.get(
+  "/productos/:idproducto/bodega/:idbodega/ubicaciones",
+  BodegaController.getUbicacionesByProductoBodega
+);
+router.post(
+  "/productos/ubicacion",
+  BodegaController.asignarUbicacionProductoBodega
+);
+router.delete(
+  "/productos/:idproducto/bodega/:idbodega/ubicacion/:idubicacion",
+  BodegaController.eliminarUbicacionProductoBodega
+);
+
 // Transferir producto a otra bodega
 router.post("/transferir", BodegaController.transferirProducto);
 
