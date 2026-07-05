@@ -25,7 +25,6 @@ const productsService = {
     return result.rows;
   },
 
-  // Obtener solo id y nombre para selects - FILTRADO POR BODEGA
   getTodosProductosSelect: async (idbodega) => {
     let sql = `
       SELECT p.idproducto, p.nombre 
@@ -55,8 +54,6 @@ const productsService = {
         p.idproducto,
         p.nombre,
         p.descripcion,
-        p.idubicacion,
-        u.nombre as ubicacion_nombre,
         p.estado,
         p.imagen,
         p.precio_venta,
@@ -64,12 +61,14 @@ const productsService = {
         COALESCE(pb.stock, 0) as stock,
         COALESCE(pb.stock_minimo, 0) as stock_minimo,
         p.codigo_barras,
-        ARRAY_AGG(DISTINCT c.nombre) as categorias
+        ARRAY_AGG(DISTINCT c.nombre) as categorias,
+        JSON_AGG(DISTINCT jsonb_build_object('idubicacion', u.idubicacion, 'nombre', u.nombre, 'idbodega', u.idbodega)) as ubicaciones
       FROM productos p
-      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
       LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto
       LEFT JOIN producto_categorias pc ON p.idproducto = pc.idproducto
       LEFT JOIN categorias c ON pc.idcategoria = c.idcategoria
+      LEFT JOIN producto_ubicacion_bodega pub ON p.idproducto = pub.idproducto
+      LEFT JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
       WHERE p.estado = 0
     `;
     
@@ -81,7 +80,7 @@ const productsService = {
     }
     
     sql += `
-      GROUP BY p.idproducto, u.nombre, u.idubicacion, pb.stock, pb.stock_minimo
+      GROUP BY p.idproducto, pb.stock, pb.stock_minimo
       ORDER BY p.nombre
     `;
     
@@ -103,7 +102,16 @@ const productsService = {
           }
         }
 
-        // Obtener productos similares (con relaciones transitivas)
+        // Filtrar ubicaciones nulas y obtener solo las de la bodega del usuario
+        let ubicaciones = producto.ubicaciones || [];
+        if (Array.isArray(ubicaciones)) {
+          ubicaciones = ubicaciones.filter(u => u && u.idubicacion !== null);
+          if (idbodega) {
+            ubicaciones = ubicaciones.filter(u => u.idbodega === parseInt(idbodega));
+          }
+        }
+
+        // Obtener productos similares
         const similaresResult = await query(
           `
           WITH RECURSIVE similar_products AS (
@@ -140,16 +148,14 @@ const productsService = {
           idproducto: producto.idproducto,
           nombre: producto.nombre,
           descripcion: producto.descripcion,
-          idubicacion: producto.idubicacion,
-          ubicacion_nombre: producto.ubicacion_nombre,
-          ubicacion: producto.ubicacion_nombre,
+          ubicaciones: ubicaciones,
           categorias: producto.categorias?.filter((c) => c !== null) || [],
           estado: producto.estado,
           imagen: imagenBase64,
           precio_venta: producto.precio_venta,
           precio_compra: producto.precio_compra,
-          stock: producto.stock,
-          stock_minimo: producto.stock_minimo,
+          stock: producto.stock || 0,
+          stock_minimo: producto.stock_minimo || 0,
           codigo_barras: producto.codigo_barras,
           productos_similares: similaresResult.rows,
         };
@@ -165,8 +171,6 @@ const productsService = {
         p.idproducto,
         p.nombre,
         p.descripcion,
-        p.idubicacion,
-        u.nombre as ubicacion_nombre,
         p.estado,
         p.imagen,
         p.precio_venta,
@@ -175,18 +179,16 @@ const productsService = {
         COALESCE(pb.stock_minimo, 0) as stock_minimo,
         p.codigo_barras,
         ARRAY_AGG(DISTINCT c.nombre) as categorias,
-        ARRAY_AGG(DISTINCT tp.nombre) as tipos
+        JSON_AGG(DISTINCT jsonb_build_object('idubicacion', u.idubicacion, 'nombre', u.nombre, 'idbodega', u.idbodega)) as ubicaciones
       FROM productos p
-      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
       LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto
       LEFT JOIN producto_categorias pc ON p.idproducto = pc.idproducto
       LEFT JOIN categorias c ON pc.idcategoria = c.idcategoria
-      LEFT JOIN producto_tipos pt ON p.idproducto = pt.idproducto
-      LEFT JOIN tipos tp ON pt.idtipo = tp.idtipo
+      LEFT JOIN producto_ubicacion_bodega pub ON p.idproducto = pub.idproducto
+      LEFT JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
       WHERE p.estado = 0 
         AND (p.nombre ILIKE $1 OR p.descripcion ILIKE $1 
-             OR c.nombre ILIKE $1 OR tp.nombre ILIKE $1
-             OR p.codigo_barras ILIKE $1)
+             OR c.nombre ILIKE $1 OR p.codigo_barras ILIKE $1)
     `;
     
     const params = [`%${termino}%`];
@@ -197,7 +199,7 @@ const productsService = {
     }
     
     sql += `
-      GROUP BY p.idproducto, u.nombre, u.idubicacion, pb.stock, pb.stock_minimo
+      GROUP BY p.idproducto, pb.stock, pb.stock_minimo
       ORDER BY p.nombre
     `;
     
@@ -216,6 +218,15 @@ const productsService = {
               error,
             );
             imagenBase64 = "";
+          }
+        }
+
+        // Filtrar ubicaciones nulas
+        let ubicaciones = producto.ubicaciones || [];
+        if (Array.isArray(ubicaciones)) {
+          ubicaciones = ubicaciones.filter(u => u && u.idubicacion !== null);
+          if (idbodega) {
+            ubicaciones = ubicaciones.filter(u => u.idbodega === parseInt(idbodega));
           }
         }
 
@@ -255,16 +266,14 @@ const productsService = {
           idproducto: producto.idproducto,
           nombre: producto.nombre,
           descripcion: producto.descripcion,
-          idubicacion: producto.idubicacion,
-          ubicacion_nombre: producto.ubicacion_nombre,
-          ubicacion: producto.ubicacion_nombre,
+          ubicaciones: ubicaciones,
           categorias: producto.categorias?.filter((c) => c !== null) || [],
           estado: producto.estado,
           imagen: imagenBase64,
           precio_venta: producto.precio_venta,
           precio_compra: producto.precio_compra,
-          stock: producto.stock,
-          stock_minimo: producto.stock_minimo,
+          stock: producto.stock || 0,
+          stock_minimo: producto.stock_minimo || 0,
           codigo_barras: producto.codigo_barras,
           productos_similares: similaresResult.rows,
         };
@@ -280,8 +289,6 @@ const productsService = {
         p.idproducto,
         p.nombre,
         p.descripcion,
-        p.idubicacion,
-        u.nombre as ubicacion_nombre,
         p.estado,
         p.imagen,
         p.precio_venta,
@@ -290,14 +297,13 @@ const productsService = {
         COALESCE(pb.stock_minimo, 0) as stock_minimo,
         p.codigo_barras,
         ARRAY_AGG(DISTINCT c.nombre) as categorias,
-        ARRAY_AGG(DISTINCT tp.nombre) as tipos
+        JSON_AGG(DISTINCT jsonb_build_object('idubicacion', u.idubicacion, 'nombre', u.nombre, 'idbodega', u.idbodega)) as ubicaciones
       FROM productos p
-      LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
       LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto
       LEFT JOIN producto_categorias pc ON p.idproducto = pc.idproducto
       LEFT JOIN categorias c ON pc.idcategoria = c.idcategoria
-      LEFT JOIN producto_tipos pt ON p.idproducto = pt.idproducto
-      LEFT JOIN tipos tp ON pt.idtipo = tp.idtipo
+      LEFT JOIN producto_ubicacion_bodega pub ON p.idproducto = pub.idproducto
+      LEFT JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
       WHERE p.idproducto = $1 AND p.estado = 0
     `;
     
@@ -309,7 +315,7 @@ const productsService = {
     }
     
     sql += `
-      GROUP BY p.idproducto, u.nombre, u.idubicacion, pb.stock, pb.stock_minimo
+      GROUP BY p.idproducto, pb.stock, pb.stock_minimo
     `;
     
     const result = await query(sql, params);
@@ -331,6 +337,15 @@ const productsService = {
           error,
         );
         imagenBase64 = "";
+      }
+    }
+
+    // Filtrar ubicaciones nulas
+    let ubicaciones = producto.ubicaciones || [];
+    if (Array.isArray(ubicaciones)) {
+      ubicaciones = ubicaciones.filter(u => u && u.idubicacion !== null);
+      if (idbodega) {
+        ubicaciones = ubicaciones.filter(u => u.idbodega === parseInt(idbodega));
       }
     }
 
@@ -370,16 +385,14 @@ const productsService = {
       idproducto: producto.idproducto,
       nombre: producto.nombre,
       descripcion: producto.descripcion,
-      idubicacion: producto.idubicacion,
-      ubicacion_nombre: producto.ubicacion_nombre,
-      ubicacion: producto.ubicacion_nombre,
+      ubicaciones: ubicaciones,
       categorias: producto.categorias?.filter((c) => c !== null) || [],
       estado: producto.estado,
       imagen: imagenBase64,
       precio_venta: producto.precio_venta,
       precio_compra: producto.precio_compra,
-      stock: producto.stock,
-      stock_minimo: producto.stock_minimo,
+      stock: producto.stock || 0,
+      stock_minimo: producto.stock_minimo || 0,
       codigo_barras: producto.codigo_barras,
       productos_similares: similaresResult.rows,
     };
@@ -488,13 +501,12 @@ const productsService = {
       // Insertar producto
       const productoResult = await client.query(
         `INSERT INTO productos (
-          nombre, descripcion, idubicacion, imagen, 
+          nombre, descripcion, imagen, 
           precio_compra, precio_venta, codigo_barras, estado
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0) RETURNING *`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, 0) RETURNING *`,
         [
           productoData.nombre,
           productoData.descripcion,
-          productoData.idubicacion,
           imagenBuffer,
           productoData.precio_compra,
           productoData.precio_venta,
@@ -516,6 +528,17 @@ const productsService = {
             productoData.stock_minimo || 0,
           ],
         );
+      }
+
+      // Insertar ubicaciones
+      if (productoData.ubicaciones && productoData.ubicaciones.length > 0) {
+        for (const idubicacion of productoData.ubicaciones) {
+          await client.query(
+            `INSERT INTO producto_ubicacion_bodega (idproducto, idbodega, idubicacion) 
+             VALUES ($1, $2, $3)`,
+            [producto.idproducto, productoData.idbodega, idubicacion],
+          );
+        }
       }
 
       // Insertar categorías
@@ -582,27 +605,25 @@ const productsService = {
       let updateQuery = `
         UPDATE productos SET 
           nombre = $1, 
-          descripcion = $2, 
-          idubicacion = $3,
-          precio_compra = $4, 
-          precio_venta = $5, 
-          codigo_barras = $6
+          descripcion = $2,
+          precio_compra = $3, 
+          precio_venta = $4, 
+          codigo_barras = $5
       `;
 
       const queryParams = [
         productoData.nombre,
         productoData.descripcion,
-        productoData.idubicacion,
         productoData.precio_compra,
         productoData.precio_venta,
         productoData.codigo_barras || null,
       ];
 
       if (imagenBuffer) {
-        updateQuery += `, imagen = $7 WHERE idproducto = $8`;
+        updateQuery += `, imagen = $6 WHERE idproducto = $7`;
         queryParams.push(imagenBuffer, id);
       } else {
-        updateQuery += ` WHERE idproducto = $7`;
+        updateQuery += ` WHERE idproducto = $6`;
         queryParams.push(id);
       }
 
@@ -622,6 +643,21 @@ const productsService = {
             productoData.stock_minimo || 0,
           ],
         );
+      }
+
+      // Actualizar ubicaciones
+      await client.query(
+        "DELETE FROM producto_ubicacion_bodega WHERE idproducto = $1",
+        [id],
+      );
+      if (productoData.ubicaciones && productoData.ubicaciones.length > 0) {
+        for (const idubicacion of productoData.ubicaciones) {
+          await client.query(
+            `INSERT INTO producto_ubicacion_bodega (idproducto, idbodega, idubicacion) 
+             VALUES ($1, $2, $3)`,
+            [id, productoData.idbodega, idubicacion],
+          );
+        }
       }
 
       // Actualizar categorías

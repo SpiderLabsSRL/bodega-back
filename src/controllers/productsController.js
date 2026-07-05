@@ -22,7 +22,6 @@ const productsController = {
     }
   },
 
-  // Obtener solo id y nombre para selects - FILTRADO POR BODEGA
   getTodosProductosSelect: async (req, res) => {
     try {
       const { bodega } = req.query;
@@ -33,7 +32,6 @@ const productsController = {
     }
   },
 
-  // CRUD de productos - MODIFICADO para búsqueda con filtro de bodega
   getProductos: async (req, res) => {
     try {
       const { termino, bodega } = req.query;
@@ -51,7 +49,6 @@ const productsController = {
     }
   },
 
-  // Obtener todos los productos - FILTRADO POR BODEGA
   getTodosProductos: async (req, res) => {
     try {
       const { bodega } = req.query;
@@ -62,7 +59,6 @@ const productsController = {
     }
   },
 
-  // Búsqueda específica - FILTRADO POR BODEGA
   buscarProductos: async (req, res) => {
     try {
       const { termino, bodega } = req.query;
@@ -93,7 +89,7 @@ const productsController = {
       const productoData = {
         nombre: req.body.nombre,
         descripcion: req.body.descripcion,
-        idubicacion: parseInt(req.body.idubicacion),
+        ubicaciones: JSON.parse(req.body.ubicaciones || "[]"),
         categorias: JSON.parse(req.body.categorias || "[]"),
         precio_compra: parseFloat(req.body.precio_compra || 0),
         precio_venta: parseFloat(req.body.precio_venta || 0),
@@ -129,7 +125,7 @@ const productsController = {
       const productoData = {
         nombre: req.body.nombre,
         descripcion: req.body.descripcion,
-        idubicacion: parseInt(req.body.idubicacion),
+        ubicaciones: JSON.parse(req.body.ubicaciones || "[]"),
         categorias: JSON.parse(req.body.categorias || "[]"),
         precio_compra: parseFloat(req.body.precio_compra || 0),
         precio_venta: parseFloat(req.body.precio_venta || 0),
@@ -172,13 +168,16 @@ const productsController = {
   updateStockProducto: async (req, res) => {
     try {
       const { id } = req.params;
-      const { cantidad } = req.body;
-      const { bodega } = req.query;
+      const { cantidad, idbodega } = req.body;
+      
+      if (!idbodega) {
+        return res.status(400).json({ error: "Se requiere idbodega" });
+      }
       
       const producto = await productsService.updateStockProducto(
         parseInt(id),
         cantidad,
-        bodega,
+        parseInt(idbodega),
       );
       res.json(producto);
     } catch (error) {
