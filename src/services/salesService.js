@@ -5,17 +5,39 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
     return [];
   }
 
+  // Si no se proporciona idbodega, no devolvemos productos
+  if (!idbodega) {
+    console.log("⚠️ No se proporcionó idbodega, no se pueden buscar productos");
+    return [];
+  }
+
+  // CAMBIAR DE const A let - ESTA ES LA LÍNEA CRÍTICA
   let productsSql = `
     SELECT 
       p.idproducto,
       p.nombre,
       p.descripcion,
       p.estado,
-      p.idubicacion,
-      u.nombre as nombre_ubicacion,
       p.imagen,
       p.precio_venta,
       COALESCE(pb.stock, 0) as stock,
+      (
+        SELECT COALESCE(
+          json_agg(
+            json_build_object(
+              'idubicacion', u.idubicacion,
+              'nombre_ubicacion', u.nombre,
+              'idbodega', u.idbodega
+            )
+          ),
+          '[]'::json
+        )
+        FROM producto_ubicacion_bodega pub
+        JOIN ubicaciones u ON pub.idubicacion = u.idubicacion
+        WHERE pub.idproducto = p.idproducto 
+          AND pub.idbodega = pb.idbodega
+          AND u.estado = 0
+      ) as ubicaciones,
       COALESCE(
         (SELECT json_agg(
           json_build_object(
@@ -29,28 +51,25 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
         ), '[]'::json
       ) as productos_similares
     FROM productos p
-    LEFT JOIN ubicaciones u ON p.idubicacion = u.idubicacion
-    LEFT JOIN producto_bodega pb ON p.idproducto = pb.idproducto
+    INNER JOIN producto_bodega pb ON p.idproducto = pb.idproducto AND pb.idbodega = $2
     WHERE p.estado = 0 
-      AND (p.nombre ILIKE $1 OR p.descripcion ILIKE $1 OR p.codigo_barras ILIKE $1)
+      AND (
+        p.nombre ILIKE $1 
+        OR p.descripcion ILIKE $1 
+        OR p.codigo_barras ILIKE $1
+      )
+      AND pb.idbodega IS NOT NULL
   `;
 
-  const params = [`%${searchQuery}%`];
-
-  if (idbodega) {
-    productsSql += ` AND pb.idbodega = $2`;
-    params.push(idbodega);
-  }
+  const params = [`%${searchQuery}%`, idbodega];
 
   if (withoutStock) {
-    const stockCondition = idbodega 
-      ? ` AND COALESCE(pb.stock, 0) > 0` 
-      : ` AND COALESCE(pb.stock, 0) > 0`;
-    productsSql += stockCondition;
+    // AHORA productsSql es let, esto funciona
+    productsSql += ` AND COALESCE(pb.stock, 0) > 0`;
   }
 
   productsSql += `
-    GROUP BY p.idproducto, u.nombre, u.idubicacion, pb.stock
+    GROUP BY p.idproducto, pb.stock, pb.idbodega
     ORDER BY p.nombre
     LIMIT 10;
   `;
@@ -59,7 +78,27 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
     console.log("📝 SQL Query:", productsSql);
     console.log("📝 Params:", params);
     const productsResult = await query(productsSql, params);
-    return productsResult.rows;
+    
+    // FILTRAR UBICACIONES POR BODEGA EN JAVASCRIPT (igual que en productsService)
+    const productosFiltrados = productsResult.rows.map(producto => {
+      let ubicaciones = producto.ubicaciones || [];
+      
+      // Filtrar ubicaciones nulas y solo las de la bodega del usuario
+      if (Array.isArray(ubicaciones)) {
+        ubicaciones = ubicaciones.filter(u => u && u.idubicacion !== null);
+        // Filtrar por bodega
+        if (idbodega) {
+          ubicaciones = ubicaciones.filter(u => u.idbodega === parseInt(idbodega));
+        }
+      }
+      
+      return {
+        ...producto,
+        ubicaciones: ubicaciones
+      };
+    });
+    
+    return productosFiltrados;
   } catch (error) {
     console.error("Error in searchProducts SQL query:", error);
     throw error;

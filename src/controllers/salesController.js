@@ -7,6 +7,12 @@ const searchProducts = async (req, res) => {
     const withoutStockParam =
       withoutStock !== undefined ? withoutStock === "true" : true;
 
+    // Si no se proporciona bodega, devolver array vacío
+    if (!bodega) {
+      console.log("⚠️ No se proporcionó bodega para búsqueda de productos");
+      return res.json([]);
+    }
+
     const products = await salesService.searchProducts(q, withoutStockParam, bodega);
     res.json(products);
   } catch (error) {
