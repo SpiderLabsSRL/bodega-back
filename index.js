@@ -30,8 +30,8 @@ const bodegaRoutes = require('./src/routes/BodegaRoutes');
 const allowedOrigins = [
   "http://localhost:8080",
   "http://localhost:3000",
-  "https://lumyra-farmacia.netlify.app",
-  "https://farmmedicus-back.onrender.com",
+  "https://traxzioncochabamba.netlify.app",
+  "https://bodega-back-wc9w.onrender.com",
 ];
 
 // Opciones de configuración CORS
