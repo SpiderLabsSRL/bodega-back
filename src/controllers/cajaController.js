@@ -3,13 +3,14 @@ const cajaService = require("../services/cajaService");
 
 exports.getTransaccionesCaja = async (req, res) => {
   try {
-    const { idusuario, fecha, fechaInicio, fechaFin, tipoCaja } = req.query;
+    const { idusuario, fecha, fechaInicio, fechaFin, tipoCaja, idbodega } = req.query;
     const filtros = {
       idusuario: idusuario ? Number(idusuario) : undefined,
       fecha,
       fechaInicio,
       fechaFin,
       tipoCaja,
+      idbodega: idbodega ? Number(idbodega) : undefined,
     };
     const transacciones = await cajaService.getTransaccionesCaja(filtros);
     res.json(transacciones);
@@ -74,6 +75,10 @@ exports.createTransaccionCaja = async (req, res) => {
 
     if (!tipoCaja || !tipoMovimiento) {
       return res.status(400).json({ error: "Tipo de caja y tipo de movimiento son requeridos" });
+    }
+
+    if (!idbodega) {
+      return res.status(400).json({ error: "ID de bodega es requerido" });
     }
 
     // Obtener o crear la caja
@@ -150,7 +155,6 @@ exports.createTransaccionCaja = async (req, res) => {
           return res.status(400).json({ error: "El usuario destino es requerido para transferencia" });
         }
 
-        // ✅ Solo enviamos idcaja_origen, el servicio encuentra la caja destino automáticamente
         resultado = await cajaService.crearTransferencia({
           idcaja_origen: caja.idcaja,
           monto: parseFloat(monto),

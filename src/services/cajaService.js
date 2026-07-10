@@ -2,7 +2,7 @@
 const { query, pool } = require("../../db");
 
 exports.getTransaccionesCaja = async (filtros = {}) => {
-  const { idusuario, fecha, fechaInicio, fechaFin, tipoCaja } = filtros;
+  const { idusuario, fecha, fechaInicio, fechaFin, tipoCaja, idbodega } = filtros;
 
   const condiciones = [];
   const values = [];
@@ -30,6 +30,12 @@ exports.getTransaccionesCaja = async (filtros = {}) => {
     paramIndex++;
   }
 
+  if (idbodega) {
+    condiciones.push(`c.idbodega = $${paramIndex}`);
+    values.push(idbodega);
+    paramIndex++;
+  }
+
   const whereClause = condiciones.length > 0 ? `WHERE ${condiciones.join(" AND ")}` : "";
 
   const result = await query(
@@ -46,10 +52,13 @@ exports.getTransaccionesCaja = async (filtros = {}) => {
       u.apellidos,
       c.tipo AS tipo_caja,
       c.idcaja,
+      c.idbodega,
+      b.nombre as bodega_nombre,
       c.estado_caja
      FROM movimiento_caja mc
      JOIN usuarios u ON mc.idusuario = u.idusuario
      JOIN caja c ON mc.idcaja = c.idcaja
+     LEFT JOIN bodegas b ON c.idbodega = b.idbodega
      ${whereClause}
      ORDER BY mc.fecha DESC`,
     values
@@ -336,7 +345,6 @@ exports.cerrarCaja = async (idcaja, idusuario, montoCierre = null, descripcion =
   }
 };
 
-// ✅ CREAR TRANSFERENCIA - SIN idcaja_destino
 exports.crearTransferencia = async (data) => {
   const { 
     idcaja_origen, 
@@ -366,7 +374,7 @@ exports.crearTransferencia = async (data) => {
       throw new Error(`Saldo insuficiente en caja de origen. Saldo disponible: ${saldoOrigen}`);
     }
 
-    // Insertar la transferencia (sin idcaja_destino)
+    // Insertar la transferencia
     const transferenciaResult = await client.query(
       `INSERT INTO transferencias_caja 
        (idcaja_origen, monto, tipo, descripcion, estado, idusuario_solicitante) 
@@ -439,7 +447,6 @@ exports.crearTransferencia = async (data) => {
   }
 };
 
-// ✅ APROBAR TRANSFERENCIA - SIN idcaja_destino
 exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
   const client = await pool.connect();
   
@@ -520,7 +527,6 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
   }
 };
 
-// ✅ OBSERVAR TRANSFERENCIA - NO AFECTA A LA CAJA
 exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, observacion) => {
   const client = await pool.connect();
   
@@ -561,7 +567,6 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
   }
 };
 
-// ✅ RECHAZAR TRANSFERENCIA - NO AFECTA A LA CAJA
 exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, motivo) => {
   const client = await pool.connect();
   
@@ -602,7 +607,6 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
   }
 };
 
-// ✅ GET TRANSFERENCIAS PENDIENTES - SIN idcaja_destino
 exports.getTransferenciasPendientes = async () => {
   const result = await query(
     `SELECT 
