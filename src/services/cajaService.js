@@ -95,6 +95,20 @@ exports.getUsuariosCaja = async () => {
   return result.rows;
 };
 
+exports.getUsuariosAdmin = async () => {
+  const result = await query(
+    `SELECT DISTINCT 
+      tc.idusuario as id,
+      CONCAT(u.nombres, ' ', u.apellidos) as nombre,
+      u.usuario
+     FROM movimiento_caja tc
+     JOIN usuarios u ON tc.idusuario = u.idusuario
+     WHERE u.estado = 0 AND u.rol = 'Admin'
+     ORDER BY nombre`
+  );
+  return result.rows;
+};
+
 exports.createTransaccionCaja = async (transaccionData) => {
   const { idestado_caja, tipo_movimiento, descripcion, monto, idusuario, idventa } = transaccionData;
   

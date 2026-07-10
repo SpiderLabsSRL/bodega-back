@@ -52,6 +52,16 @@ exports.getUsuariosCaja = async (req, res) => {
   }
 };
 
+exports.getUsuariosAdmin = async (req, res) => {
+  try {
+    const usuarios = await cajaService.getUsuariosAdmin();
+    res.json(usuarios);
+  } catch (error) {
+    console.error("Error en getUsuariosCaja:", error);
+    res.status(500).json({ error: error.message });
+  }
+}
+
 exports.createTransaccionCaja = async (req, res) => {
   try {
     const transaccionData = req.body;

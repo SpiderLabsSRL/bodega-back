@@ -18,4 +18,6 @@ router.get("/caja/usuarios", cajaController.getUsuariosCaja);
 // Ruta para crear transacción de caja
 router.post("/caja/transacciones", cajaController.createTransaccionCaja);
 
+router.get("/caja/usuariosAdmins", cajaController.getUsuariosAdmin);
+
 module.exports = router;
