@@ -92,7 +92,7 @@ exports.getUsuariosCaja = async () => {
      WHERE u.estado = 0
      ORDER BY empleado_nombre`
   );
-  return result.rows.map(row => row.empleado_nombre);
+  return result.rows;
 };
 
 exports.createTransaccionCaja = async (transaccionData) => {
