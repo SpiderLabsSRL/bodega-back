@@ -9,8 +9,8 @@ router.get("/caja/transacciones", cajaController.getTransaccionesCaja);
 // Ruta para obtener estado actual de caja
 router.get("/caja/estado-actual", cajaController.getEstadoCajaActual);
 
-// Ruta para obtener saldo actual (monto_final)
-router.get("/caja/saldo-actual", cajaController.getSaldoActual);
+// Ruta para obtener saldo actual (monto_final) - AHORA CON PARÁMETROS
+router.get("/cash/status", cajaController.getSaldoActual);
 
 // Ruta para obtener usuarios únicos
 router.get("/caja/usuarios", cajaController.getUsuariosCaja);

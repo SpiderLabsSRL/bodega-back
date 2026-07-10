@@ -43,7 +43,8 @@ exports.getTransaccionesCaja = async (filtros = {}) => {
       mc.idventa,
       u.nombres,
       u.apellidos,
-      c.tipo AS tipo_caja
+      c.tipo AS tipo_caja,
+      c.idcaja
      FROM movimiento_caja mc
      JOIN usuarios u ON mc.idusuario = u.idusuario
      JOIN caja c ON mc.idcaja = c.idcaja
@@ -54,16 +55,29 @@ exports.getTransaccionesCaja = async (filtros = {}) => {
   return result.rows;
 };
 
-exports.getSaldoActual = async () => {
+exports.getSaldoActual = async (params = {}) => {
   try {
-    const result = await query(
-      `SELECT 
-        estado,
-        monto_final
-       FROM estado_caja 
-       ORDER BY idestado_caja DESC 
-       LIMIT 1`
-    );
+    const { idbodega, tipoCaja } = params;
+    
+    let sql = `SELECT total FROM caja WHERE 1=1`;
+    const values = [];
+    let paramIndex = 1;
+
+    if (idbodega) {
+      sql += ` AND idbodega = $${paramIndex}`;
+      values.push(idbodega);
+      paramIndex++;
+    }
+
+    if (tipoCaja) {
+      sql += ` AND tipo = $${paramIndex}`;
+      values.push(tipoCaja);
+      paramIndex++;
+    }
+
+    sql += ` ORDER BY idcaja DESC LIMIT 1`;
+
+    const result = await query(sql, values);
 
     if (result.rows.length === 0) {
       return {
@@ -72,7 +86,10 @@ exports.getSaldoActual = async () => {
       };
     }
 
-    return result.rows[0];
+    return {
+      estado: "abierta",
+      monto_final: result.rows[0].total.toString()
+    };
   } catch (error) {
     console.error("Error in getSaldoActual service:", error);
     return {
@@ -85,10 +102,10 @@ exports.getSaldoActual = async () => {
 exports.getUsuariosCaja = async () => {
   const result = await query(
     `SELECT DISTINCT 
-      tc.idusuario as idusuario,
+      mc.idusuario as idusuario,
       CONCAT(u.nombres, ' ', u.apellidos) as empleado_nombre
-     FROM movimiento_caja tc
-     JOIN usuarios u ON tc.idusuario = u.idusuario
+     FROM movimiento_caja mc
+     JOIN usuarios u ON mc.idusuario = u.idusuario
      WHERE u.estado = 0
      ORDER BY empleado_nombre`
   );
@@ -98,11 +115,11 @@ exports.getUsuariosCaja = async () => {
 exports.getUsuariosAdmin = async () => {
   const result = await query(
     `SELECT DISTINCT 
-      tc.idusuario as id,
+      mc.idusuario as id,
       CONCAT(u.nombres, ' ', u.apellidos) as nombre,
       u.usuario
-     FROM movimiento_caja tc
-     JOIN usuarios u ON tc.idusuario = u.idusuario
+     FROM movimiento_caja mc
+     JOIN usuarios u ON mc.idusuario = u.idusuario
      WHERE u.estado = 0 AND u.rol = 'Admin'
      ORDER BY nombre`
   );
@@ -110,32 +127,57 @@ exports.getUsuariosAdmin = async () => {
 };
 
 exports.createTransaccionCaja = async (transaccionData) => {
-  const { idestado_caja, tipo_movimiento, descripcion, monto, idusuario, idventa } = transaccionData;
+  const { idcaja, tipo_movimiento, descripcion, monto, idusuario, idventa } = transaccionData;
   
+  // Obtener monto actual de la caja
+  const cajaActual = await query(
+    `SELECT total FROM caja WHERE idcaja = $1`,
+    [idcaja]
+  );
+
+  const montoAnterior = cajaActual.rows.length > 0 ? parseFloat(cajaActual.rows[0].total) : 0;
+  let montoActual = montoAnterior;
+
+  if (tipo_movimiento === 'ingreso' || tipo_movimiento === 'apertura') {
+    montoActual = montoAnterior + parseFloat(monto);
+  } else if (tipo_movimiento === 'egreso' || tipo_movimiento === 'cierre') {
+    montoActual = montoAnterior - parseFloat(monto);
+  }
+
+  // Insertar movimiento
   const result = await query(
-    `INSERT INTO transacciones_caja 
-     (idestado_caja, tipo_movimiento, descripcion, monto, idusuario, idventa, fecha)
-     VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
-     RETURNING *`,
-    [idestado_caja, tipo_movimiento, descripcion, monto, idusuario, idventa]
+    `INSERT INTO movimiento_caja 
+     (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idventa) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING idmovimiento_caja`,
+    [idcaja, idusuario, monto, tipo_movimiento, descripcion, montoAnterior, montoActual, idventa || null]
   );
   
+  // Actualizar total de la caja
+  await query(
+    `UPDATE caja SET total = $1 WHERE idcaja = $2`,
+    [montoActual, idcaja]
+  );
+
+  // Obtener la transacción completa
   const transaccionCompleta = await query(
     `SELECT 
-      tc.idtransaccion,
-      tc.idestado_caja,
-      tc.tipo_movimiento,
-      tc.descripcion,
-      tc.monto,
-      tc.fecha,
-      tc.idusuario,
-      tc.idventa,
+      mc.idmovimiento_caja as idtransaccion,
+      mc.tipo as tipo_movimiento,
+      mc.descripcion,
+      mc.monto,
+      mc.fecha,
+      mc.idusuario,
+      mc.idventa,
       u.nombres,
-      u.apellidos
-     FROM transacciones_caja tc
-     JOIN usuarios u ON tc.idusuario = u.idusuario
-     WHERE tc.idtransaccion = $1`,
-    [result.rows[0].idtransaccion]
+      u.apellidos,
+      c.tipo as tipo_caja,
+      c.idcaja
+     FROM movimiento_caja mc
+     JOIN usuarios u ON mc.idusuario = u.idusuario
+     JOIN caja c ON mc.idcaja = c.idcaja
+     WHERE mc.idmovimiento_caja = $1`,
+    [result.rows[0].idmovimiento_caja]
   );
   
   return transaccionCompleta.rows[0];

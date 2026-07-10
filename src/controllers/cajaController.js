@@ -31,7 +31,8 @@ exports.getEstadoCajaActual = async (req, res) => {
 
 exports.getSaldoActual = async (req, res) => {
   try {
-    const saldoActual = await cajaService.getSaldoActual();
+    const { idbodega, tipoCaja } = req.query;
+    const saldoActual = await cajaService.getSaldoActual({ idbodega, tipoCaja });
     res.json(saldoActual);
   } catch (error) {
     console.error("Error en getSaldoActual:", error);
@@ -60,7 +61,7 @@ exports.getUsuariosAdmin = async (req, res) => {
     console.error("Error en getUsuariosCaja:", error);
     res.status(500).json({ error: error.message });
   }
-}
+};
 
 exports.createTransaccionCaja = async (req, res) => {
   try {

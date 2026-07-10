@@ -1,3 +1,4 @@
+// src/services/salesService.js
 const { query, pool } = require("../../db");
 
 const searchProducts = async (searchQuery, withoutStock = true, idbodega = null) => {
@@ -5,13 +6,11 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
     return [];
   }
 
-  // Si no se proporciona idbodega, no devolvemos productos
   if (!idbodega) {
     console.log("⚠️ No se proporcionó idbodega, no se pueden buscar productos");
     return [];
   }
 
-  // CAMBIAR DE const A let - ESTA ES LA LÍNEA CRÍTICA
   let productsSql = `
     SELECT 
       p.idproducto,
@@ -64,7 +63,6 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
   const params = [`%${searchQuery}%`, idbodega];
 
   if (withoutStock) {
-    // AHORA productsSql es let, esto funciona
     productsSql += ` AND COALESCE(pb.stock, 0) > 0`;
   }
 
@@ -79,14 +77,11 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
     console.log("📝 Params:", params);
     const productsResult = await query(productsSql, params);
     
-    // FILTRAR UBICACIONES POR BODEGA EN JAVASCRIPT (igual que en productsService)
     const productosFiltrados = productsResult.rows.map(producto => {
       let ubicaciones = producto.ubicaciones || [];
       
-      // Filtrar ubicaciones nulas y solo las de la bodega del usuario
       if (Array.isArray(ubicaciones)) {
         ubicaciones = ubicaciones.filter(u => u && u.idubicacion !== null);
-        // Filtrar por bodega
         if (idbodega) {
           ubicaciones = ubicaciones.filter(u => u.idbodega === parseInt(idbodega));
         }
@@ -157,6 +152,66 @@ const searchClientes = async (searchQuery) => {
   }
 };
 
+// Función para obtener o crear caja según tipo
+const getOrCreateCaja = async (client, idbodega, tipo) => {
+  // Buscar caja existente
+  const cajaResult = await client.query(
+    `SELECT idcaja, total FROM caja 
+     WHERE idbodega = $1 AND tipo = $2`,
+    [idbodega, tipo]
+  );
+
+  if (cajaResult.rows.length > 0) {
+    return cajaResult.rows[0];
+  }
+
+  // Crear nueva caja si no existe
+  const nombre = tipo === 'Efectivo' ? 'Caja Efectivo' : 'Caja QR';
+  const newCaja = await client.query(
+    `INSERT INTO caja (nombre, tipo, estado_caja, total, idbodega) 
+     VALUES ($1, $2, 'cerrada', 0, $3) 
+     RETURNING idcaja, total`,
+    [nombre, tipo, idbodega]
+  );
+
+  return newCaja.rows[0];
+};
+
+// Función para registrar movimiento en caja
+const registrarMovimientoCaja = async (client, idcaja, idusuario, monto, tipo, descripcion, idventa = null) => {
+  // Obtener monto actual de la caja
+  const cajaActual = await client.query(
+    `SELECT total FROM caja WHERE idcaja = $1`,
+    [idcaja]
+  );
+
+  const montoAnterior = cajaActual.rows.length > 0 ? parseFloat(cajaActual.rows[0].total) : 0;
+  let montoActual = montoAnterior;
+
+  // Calcular nuevo monto según tipo de movimiento
+  if (tipo === 'ingreso' || tipo === 'apertura') {
+    montoActual = montoAnterior + monto;
+  } else if (tipo === 'egreso' || tipo === 'cierre') {
+    montoActual = montoAnterior - monto;
+  }
+
+  // Insertar movimiento
+  await client.query(
+    `INSERT INTO movimiento_caja 
+     (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idventa) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [idcaja, idusuario, monto, tipo, descripcion, montoAnterior, montoActual, idventa]
+  );
+
+  // Actualizar total de la caja
+  await client.query(
+    `UPDATE caja SET total = $1 WHERE idcaja = $2`,
+    [montoActual, idcaja]
+  );
+
+  return { montoAnterior, montoActual };
+};
+
 const processSale = async (saleData, userId, idbodega = null) => {
   console.log("🏪 processSale called with:", { userId, idbodega, saleData });
   
@@ -175,7 +230,6 @@ const processSale = async (saleData, userId, idbodega = null) => {
       throw new Error("Usuario no válido o inactivo");
     }
 
-    // Si no se proporcionó idbodega, usar la del usuario
     if (!idbodega) {
       idbodega = userCheck.rows[0].idbodega;
       console.log("📦 Usando bodega del usuario:", idbodega);
@@ -187,7 +241,7 @@ const processSale = async (saleData, userId, idbodega = null) => {
 
     console.log("🏢 Bodega final para la venta:", idbodega);
 
-    // Verificar stock para cada producto en la bodega específica
+    // Verificar stock para cada producto
     for (const item of saleData.items) {
       const stockCheckSql = `
         SELECT COALESCE(pb.stock, 0) as stock, p.nombre 
@@ -237,7 +291,6 @@ const processSale = async (saleData, userId, idbodega = null) => {
 
     // Insertar detalle de venta y actualizar stock
     for (const item of saleData.items) {
-      // Insertar detalle
       await client.query(
         `INSERT INTO detalle_ventas (idventa, idproducto, idbodega, cantidad, precio_unitario, subtotal_linea) 
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -251,7 +304,6 @@ const processSale = async (saleData, userId, idbodega = null) => {
         ],
       );
 
-      // Actualizar stock en producto_bodega
       const updateStockResult = await client.query(
         `UPDATE producto_bodega 
          SET stock = stock - $1 
@@ -261,7 +313,6 @@ const processSale = async (saleData, userId, idbodega = null) => {
       );
 
       if (updateStockResult.rows.length === 0) {
-        // Si no existe el registro, crearlo con stock negativo (no debería pasar)
         await client.query(
           `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
            VALUES ($1, $2, -$3, 0)`,
@@ -271,6 +322,31 @@ const processSale = async (saleData, userId, idbodega = null) => {
 
       console.log(`📦 Stock actualizado para producto ${item.idproducto} en bodega ${idbodega}`);
     }
+
+    // ============================================
+    // REGISTRO EN CAJA SEGÚN MÉTODO DE PAGO
+    // ============================================
+    const metodoPago = saleData.metodo_pago || 'Efectivo';
+    const totalVenta = parseFloat(saleData.total) || 0;
+
+    console.log(`💰 Registrando venta en caja ${metodoPago} por Bs ${totalVenta}`);
+
+    // Obtener o crear la caja correspondiente
+    const caja = await getOrCreateCaja(client, idbodega, metodoPago);
+    console.log(`📦 Caja ${metodoPago} encontrada/creada:`, caja);
+
+    // Registrar ingreso en caja
+    await registrarMovimientoCaja(
+      client,
+      caja.idcaja,
+      userId,
+      totalVenta,
+      'ingreso',
+      `Venta #${saleId} - ${saleData.descripcion || 'Venta de productos'}`,
+      saleId
+    );
+
+    console.log(`✅ Movimiento de caja registrado para venta #${saleId}`);
 
     await client.query("COMMIT");
     console.log("✅ Venta completada exitosamente");
