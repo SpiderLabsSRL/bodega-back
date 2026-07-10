@@ -3,8 +3,12 @@ const cashService = require("../services/cashService");
 
 exports.getCashStatus = async (req, res) => {
   try {
-    // MODIFICADO: Ya no necesita userId para obtener estado global
-    const cashStatus = await cashService.getCashStatus();
+    const { tipoCaja, idbodega } = req.query;
+    const filtros = {
+      idbodega,
+      tipoCaja,
+    };
+    const cashStatus = await cashService.getCashStatus(filtros);
     res.json(cashStatus);
   } catch (error) {
     console.error("Error in getCashStatus controller:", error);

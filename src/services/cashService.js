@@ -1,18 +1,19 @@
 // src/services/cashService.js
 const { query, pool } = require("../../db");
 
-exports.getCashStatus = async (userId) => {
+exports.getCashStatus = async (filtros = {}) => {
   try {
-    // MODIFICADO: Obtener el último estado de caja sin importar el usuario
+    const { idbodega, tipoCaja } = filtros;
+    console.log(filtros);
     const result = await query(
-      `
-      SELECT 
-        ec.estado,
-        ec.monto_final
-      FROM estado_caja ec
-      ORDER BY ec.idestado_caja DESC
-      LIMIT 1
-      `
+      `SELECT 
+        estado_caja as estado,
+        total as monto_final
+       FROM caja 
+       WHERE tipo = $1 AND idbodega = $2
+       ORDER BY idcaja DESC 
+       LIMIT 1`
+       ,[tipoCaja, idbodega]
     );
 
     if (result.rows.length === 0) {
