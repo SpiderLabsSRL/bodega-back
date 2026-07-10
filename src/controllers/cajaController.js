@@ -3,69 +3,18 @@ const cajaService = require("../services/cajaService");
 
 exports.getTransaccionesCaja = async (req, res) => {
   try {
-    const transacciones = await cajaService.getTransaccionesCaja();
+    const { idusuario, fecha, fechaInicio, fechaFin, tipoCaja } = req.query;
+    const filtros = {
+      idusuario: idusuario ? Number(idusuario) : undefined,
+      fecha,
+      fechaInicio,
+      fechaFin,
+      tipoCaja,
+    };
+    const transacciones = await cajaService.getTransaccionesCaja(filtros);
     res.json(transacciones);
   } catch (error) {
     console.error("Error en getTransaccionesCaja:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-exports.getTransaccionesCajaByFecha = async (req, res) => {
-  try {
-    const { fecha } = req.params;
-    const transacciones = await cajaService.getTransaccionesCajaByFecha(fecha);
-    res.json(transacciones);
-  } catch (error) {
-    console.error("Error en getTransaccionesCajaByFecha:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-exports.getTransaccionesCajaByRango = async (req, res) => {
-  try {
-    const { fechaInicio, fechaFin } = req.params;
-    const transacciones = await cajaService.getTransaccionesCajaByRango(fechaInicio, fechaFin);
-    res.json(transacciones);
-  } catch (error) {
-    console.error("Error en getTransaccionesCajaByRango:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-exports.getTransaccionesCajaByUsuario = async (req, res) => {
-  try {
-    const { idusuario } = req.params;
-    const transacciones = await cajaService.getTransaccionesCajaByUsuario(parseInt(idusuario));
-    res.json(transacciones);
-  } catch (error) {
-    console.error("Error en getTransaccionesCajaByUsuario:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-exports.getTransaccionesCajaByUsuarioFecha = async (req, res) => {
-  try {
-    const { idusuario, fecha } = req.params;
-    const transacciones = await cajaService.getTransaccionesCajaByUsuarioFecha(parseInt(idusuario), fecha);
-    res.json(transacciones);
-  } catch (error) {
-    console.error("Error en getTransaccionesCajaByUsuarioFecha:", error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
-exports.getTransaccionesCajaByUsuarioRango = async (req, res) => {
-  try {
-    const { idusuario, fechaInicio, fechaFin } = req.params;
-    const transacciones = await cajaService.getTransaccionesCajaByUsuarioRango(
-      parseInt(idusuario), 
-      fechaInicio, 
-      fechaFin
-    );
-    res.json(transacciones);
-  } catch (error) {
-    console.error("Error en getTransaccionesCajaByUsuarioRango:", error);
     res.status(500).json({ error: error.message });
   }
 };
