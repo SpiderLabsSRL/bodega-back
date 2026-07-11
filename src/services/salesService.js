@@ -152,11 +152,48 @@ const searchClientes = async (searchQuery) => {
   }
 };
 
+// Función para verificar si la caja está abierta
+const verificarCajaAbierta = async (client, idcaja) => {
+  const result = await client.query(
+    `SELECT estado_caja FROM caja WHERE idcaja = $1`,
+    [idcaja]
+  );
+  
+  if (result.rows.length === 0) {
+    throw new Error("No se encontró la caja");
+  }
+  
+  if (result.rows[0].estado_caja !== 'abierta') {
+    throw new Error("La caja está cerrada. No se pueden realizar ventas.");
+  }
+  
+  return result.rows[0].estado_caja;
+};
+
+// Función para obtener estado de la caja
+const getEstadoCaja = async (idbodega, tipo) => {
+  try {
+    const result = await query(
+      `SELECT estado_caja FROM caja WHERE idbodega = $1 AND tipo = $2`,
+      [idbodega, tipo]
+    );
+    
+    if (result.rows.length === 0) {
+      return 'cerrada';
+    }
+    
+    return result.rows[0].estado_caja;
+  } catch (error) {
+    console.error("Error getting caja estado:", error);
+    return 'cerrada';
+  }
+};
+
 // Función para obtener o crear caja según tipo
 const getOrCreateCaja = async (client, idbodega, tipo) => {
   // Buscar caja existente
   const cajaResult = await client.query(
-    `SELECT idcaja, total FROM caja 
+    `SELECT idcaja, total, estado_caja FROM caja 
      WHERE idbodega = $1 AND tipo = $2`,
     [idbodega, tipo]
   );
@@ -170,7 +207,7 @@ const getOrCreateCaja = async (client, idbodega, tipo) => {
   const newCaja = await client.query(
     `INSERT INTO caja (nombre, tipo, estado_caja, total, idbodega) 
      VALUES ($1, $2, 'cerrada', 0, $3) 
-     RETURNING idcaja, total`,
+     RETURNING idcaja, total, estado_caja`,
     [nombre, tipo, idbodega]
   );
 
@@ -268,6 +305,20 @@ const processSale = async (saleData, userId, idbodega = null) => {
       }
     }
 
+    // ============================================
+    // VERIFICAR QUE LA CAJA ESTÉ ABIERTA
+    // ============================================
+    const metodoPago = saleData.metodo_pago || 'Efectivo';
+    console.log(`💰 Verificando caja ${metodoPago} para bodega ${idbodega}`);
+    
+    // Obtener la caja correspondiente
+    const caja = await getOrCreateCaja(client, idbodega, metodoPago);
+    console.log(`📦 Caja ${metodoPago} encontrada:`, caja);
+    
+    // Verificar que la caja esté abierta
+    await verificarCajaAbierta(client, caja.idcaja);
+    console.log(`✅ Caja ${metodoPago} está abierta`);
+
     // Insertar venta
     const saleResult = await client.query(
       `INSERT INTO ventas (fecha_hora, idusuario, idbodega, idcliente, descripcion, sub_total, descuento, total, metodo_pago, descripcion_descuento) 
@@ -326,23 +377,20 @@ const processSale = async (saleData, userId, idbodega = null) => {
     // ============================================
     // REGISTRO EN CAJA SEGÚN MÉTODO DE PAGO
     // ============================================
-    const metodoPago = saleData.metodo_pago || 'Efectivo';
     const totalVenta = parseFloat(saleData.total) || 0;
 
     console.log(`💰 Registrando venta en caja ${metodoPago} por Bs ${totalVenta}`);
 
-    // Obtener o crear la caja correspondiente
-    const caja = await getOrCreateCaja(client, idbodega, metodoPago);
-    console.log(`📦 Caja ${metodoPago} encontrada/creada:`, caja);
-
-    // Registrar ingreso en caja
+    // Registrar ingreso en caja con descripción solo de los productos
+    const descripcionMovimiento = saleData.descripcion || 'Venta de productos';
+    
     await registrarMovimientoCaja(
       client,
       caja.idcaja,
       userId,
       totalVenta,
       'ingreso',
-      `Venta #${saleId} - ${saleData.descripcion || 'Venta de productos'}`,
+      descripcionMovimiento,
       saleId
     );
 
@@ -365,4 +413,5 @@ module.exports = {
   searchProducts,
   searchClientes,
   processSale,
-};
+  getEstadoCaja,
+};  

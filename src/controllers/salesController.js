@@ -60,6 +60,28 @@ const processSale = async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error("Error in processSale:", error);
+    // Enviar mensaje de error específico para caja cerrada
+    if (error.message.includes("caja está cerrada")) {
+      res.status(400).json({ error: error.message });
+    } else {
+      res.status(500).json({ error: error.message });
+    }
+  }
+};
+
+// Nuevo endpoint para obtener el estado de la caja
+const getEstadoCaja = async (req, res) => {
+  try {
+    const { idbodega, tipo } = req.query;
+    
+    if (!idbodega || !tipo) {
+      return res.status(400).json({ error: "Se requiere idbodega y tipo" });
+    }
+    
+    const estado = await salesService.getEstadoCaja(parseInt(idbodega), tipo);
+    res.json({ estado });
+  } catch (error) {
+    console.error("Error getting estado caja:", error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -68,4 +90,5 @@ module.exports = {
   searchProducts,
   searchClientes,
   processSale,
+  getEstadoCaja,
 };
