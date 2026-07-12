@@ -19,7 +19,9 @@ exports.getTransferencias = async (idusuario, rol) => {
         u_sol.nombres || ' ' || u_sol.apellidos as usuario_origen,
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
-        c_origen.tipo as tipo_origen
+        c_origen.tipo as tipo_origen,
+        t.idmovimiento_egreso,
+        t.idmovimiento_reversion
       FROM transferencias_caja t
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
       LEFT JOIN usuarios u_apr ON t.idusuario_aprobador = u_apr.idusuario
@@ -47,7 +49,7 @@ exports.getTransferencias = async (idusuario, rol) => {
   }
 };
 
-// Crear una transferencia (siempre pendiente)
+// Crear una transferencia - DESCUENTA INMEDIATAMENTE DE LA CAJA
 exports.crearTransferencia = async (data) => {
   const { 
     idcaja_origen, 
@@ -72,29 +74,68 @@ exports.crearTransferencia = async (data) => {
       throw new Error("La caja de origen no existe");
     }
 
-    // Verificar que el monto no exceda el saldo de origen
     const saldoOrigen = parseFloat(cajaOrigen.rows[0].total);
-    if (saldoOrigen < parseFloat(monto)) {
+    const montoTransferencia = parseFloat(monto);
+
+    // Verificar que haya saldo suficiente
+    if (saldoOrigen < montoTransferencia) {
       throw new Error(`Saldo insuficiente en caja de origen. Saldo disponible: ${saldoOrigen}`);
     }
 
-    // Insertar la transferencia (siempre pendiente)
+    // 1. Insertar la transferencia con estado 'pendiente'
     const transferenciaResult = await client.query(
       `INSERT INTO transferencias_caja 
        (idcaja_origen, monto, tipo, descripcion, estado, idusuario_solicitante) 
        VALUES ($1, $2, $3, $4, 'pendiente', $5)
        RETURNING idtransferencia`,
-      [idcaja_origen, monto, tipo, descripcion, idusuario_solicitante]
+      [idcaja_origen, montoTransferencia, tipo, descripcion, idusuario_solicitante]
     );
 
     const idtransferencia = transferenciaResult.rows[0].idtransferencia;
+
+    // 2. DESCONTAR INMEDIATAMENTE DE LA CAJA
+    const nuevoSaldo = saldoOrigen - montoTransferencia;
+
+    const movimientoResult = await client.query(
+      `INSERT INTO movimiento_caja 
+       (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
+       VALUES ($1, $2, $3, 'egreso', $4, $5, $6, $7)
+       RETURNING idmovimiento_caja`,
+      [
+        idcaja_origen, 
+        idusuario_solicitante, 
+        montoTransferencia, 
+        `Transferencia pendiente - ${descripcion}`,
+        saldoOrigen,
+        nuevoSaldo,
+        idtransferencia
+      ]
+    );
+
+    const idmovimiento = movimientoResult.rows[0].idmovimiento_caja;
+
+    // Guardar el ID del movimiento de egreso
+    await client.query(
+      `UPDATE transferencias_caja SET idmovimiento_egreso = $1 WHERE idtransferencia = $2`,
+      [idmovimiento, idtransferencia]
+    );
+
+    // Actualizar saldo de la caja
+    await client.query(
+      `UPDATE caja SET total = $1 WHERE idcaja = $2`,
+      [nuevoSaldo, idcaja_origen]
+    );
 
     await client.query("COMMIT");
     
     return { 
       idtransferencia, 
       estado: 'pendiente',
-      mensaje: 'Transferencia registrada, pendiente de aprobación'
+      mensaje: 'Transferencia registrada. Se descontó de la caja. Pendiente de aprobación.',
+      saldo_anterior: saldoOrigen,
+      saldo_actual: nuevoSaldo,
+      monto_descontado: montoTransferencia,
+      idmovimiento_egreso: idmovimiento
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -104,7 +145,7 @@ exports.crearTransferencia = async (data) => {
   }
 };
 
-// Aprobar transferencia - SOLO EGRESO DE CAJA ORIGEN
+// Aprobar transferencia - YA ESTÁ DESCONTADA, SOLO CAMBIA ESTADO
 exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
   const client = await pool.connect();
   
@@ -122,20 +163,7 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
 
     const data = transferencia.rows[0];
 
-    const cajaOrigen = await client.query(
-      `SELECT idcaja, total, estado_caja FROM caja WHERE idcaja = $1`,
-      [data.idcaja_origen]
-    );
-
-    if (cajaOrigen.rows.length === 0) {
-      throw new Error("Caja de origen no encontrada");
-    }
-
-    const saldoOrigen = parseFloat(cajaOrigen.rows[0].total);
-    if (saldoOrigen < parseFloat(data.monto)) {
-      throw new Error(`Saldo insuficiente en caja de origen. Saldo disponible: ${saldoOrigen}`);
-    }
-
+    // Actualizar estado de la transferencia a 'aprobada'
     await client.query(
       `UPDATE transferencias_caja 
        SET estado = 'aprobada', 
@@ -145,27 +173,12 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
       [idusuario_aprobador, idtransferencia]
     );
 
-    // EGRESO EN CAJA ORIGEN
-    const nuevoSaldoOrigen = saldoOrigen - parseFloat(data.monto);
-    
+    // Actualizar la descripción del movimiento de egreso
     await client.query(
-      `INSERT INTO movimiento_caja 
-       (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
-       VALUES ($1, $2, $3, 'egreso', $4, $5, $6, $7)`,
-      [
-        data.idcaja_origen, 
-        data.idusuario_solicitante, 
-        data.monto, 
-        `Transferencia aprobada - ${data.descripcion}`,
-        saldoOrigen,
-        nuevoSaldoOrigen,
-        idtransferencia
-      ]
-    );
-
-    await client.query(
-      `UPDATE caja SET total = $1 WHERE idcaja = $2`,
-      [nuevoSaldoOrigen, data.idcaja_origen]
+      `UPDATE movimiento_caja 
+       SET descripcion = $1 
+       WHERE idmovimiento_caja = $2`,
+      [`Transferencia APROBADA - ${data.descripcion}`, data.idmovimiento_egreso]
     );
 
     await client.query("COMMIT");
@@ -174,9 +187,7 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
       idtransferencia, 
       estado: 'aprobada',
       mensaje: 'Transferencia aprobada correctamente',
-      saldo_anterior: saldoOrigen,
-      saldo_actual: nuevoSaldoOrigen,
-      monto_egresado: data.monto
+      saldo_actual: parseFloat(data.monto) // El saldo ya está descontado
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -186,7 +197,7 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
   }
 };
 
-// Observar transferencia - NO AFECTA A LA CAJA
+// Observar transferencia - REVERSIÓN (DEVOLVER DINERO A LA CAJA)
 exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, observacion) => {
   const client = await pool.connect();
   
@@ -202,6 +213,9 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
       throw new Error("Transferencia no encontrada o ya procesada");
     }
 
+    const data = transferencia.rows[0];
+
+    // Actualizar estado de la transferencia a 'observada'
     await client.query(
       `UPDATE transferencias_caja 
        SET estado = 'observada', 
@@ -212,12 +226,62 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
       [idusuario_aprobador, observacion, idtransferencia]
     );
 
+    // Obtener saldo actual de la caja
+    const cajaOrigen = await client.query(
+      `SELECT idcaja, total FROM caja WHERE idcaja = $1`,
+      [data.idcaja_origen]
+    );
+
+    if (cajaOrigen.rows.length === 0) {
+      throw new Error("Caja de origen no encontrada");
+    }
+
+    const saldoActual = parseFloat(cajaOrigen.rows[0].total);
+    const montoTransferencia = parseFloat(data.monto);
+    
+    // DEVOLVER EL DINERO A LA CAJA (REVERSIÓN)
+    const nuevoSaldo = saldoActual + montoTransferencia;
+
+    const movimientoResult = await client.query(
+      `INSERT INTO movimiento_caja 
+       (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
+       VALUES ($1, $2, $3, 'ingreso', $4, $5, $6, $7)
+       RETURNING idmovimiento_caja`,
+      [
+        data.idcaja_origen, 
+        idusuario_aprobador, 
+        montoTransferencia, 
+        `REVERSIÓN por observación - ${data.descripcion}`,
+        saldoActual,
+        nuevoSaldo,
+        idtransferencia
+      ]
+    );
+
+    const idmovimiento = movimientoResult.rows[0].idmovimiento_caja;
+
+    // Guardar el ID del movimiento de reversión
+    await client.query(
+      `UPDATE transferencias_caja SET idmovimiento_reversion = $1 WHERE idtransferencia = $2`,
+      [idmovimiento, idtransferencia]
+    );
+
+    // Actualizar saldo de la caja (se incrementa)
+    await client.query(
+      `UPDATE caja SET total = $1 WHERE idcaja = $2`,
+      [nuevoSaldo, data.idcaja_origen]
+    );
+
     await client.query("COMMIT");
     
     return { 
       idtransferencia, 
       estado: 'observada',
-      mensaje: 'Transferencia marcada como observada'
+      mensaje: 'Transferencia observada. Se devolvió el dinero a la caja.',
+      saldo_anterior: saldoActual,
+      saldo_actual: nuevoSaldo,
+      monto_revertido: montoTransferencia,
+      idmovimiento_reversion: idmovimiento
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -227,7 +291,7 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
   }
 };
 
-// Rechazar transferencia - NO AFECTA A LA CAJA
+// Rechazar transferencia - REVERSIÓN (DEVOLVER DINERO A LA CAJA)
 exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, motivo) => {
   const client = await pool.connect();
   
@@ -243,6 +307,9 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
       throw new Error("Transferencia no encontrada o ya procesada");
     }
 
+    const data = transferencia.rows[0];
+
+    // Actualizar estado de la transferencia a 'observada'
     await client.query(
       `UPDATE transferencias_caja 
        SET estado = 'observada', 
@@ -253,12 +320,62 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
       [idusuario_aprobador, motivo || 'Transferencia rechazada', idtransferencia]
     );
 
+    // Obtener saldo actual de la caja
+    const cajaOrigen = await client.query(
+      `SELECT idcaja, total FROM caja WHERE idcaja = $1`,
+      [data.idcaja_origen]
+    );
+
+    if (cajaOrigen.rows.length === 0) {
+      throw new Error("Caja de origen no encontrada");
+    }
+
+    const saldoActual = parseFloat(cajaOrigen.rows[0].total);
+    const montoTransferencia = parseFloat(data.monto);
+    
+    // DEVOLVER EL DINERO A LA CAJA (REVERSIÓN)
+    const nuevoSaldo = saldoActual + montoTransferencia;
+
+    const movimientoResult = await client.query(
+      `INSERT INTO movimiento_caja 
+       (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
+       VALUES ($1, $2, $3, 'ingreso', $4, $5, $6, $7)
+       RETURNING idmovimiento_caja`,
+      [
+        data.idcaja_origen, 
+        idusuario_aprobador, 
+        montoTransferencia, 
+        `REVERSIÓN por rechazo - ${data.descripcion}`,
+        saldoActual,
+        nuevoSaldo,
+        idtransferencia
+      ]
+    );
+
+    const idmovimiento = movimientoResult.rows[0].idmovimiento_caja;
+
+    // Guardar el ID del movimiento de reversión
+    await client.query(
+      `UPDATE transferencias_caja SET idmovimiento_reversion = $1 WHERE idtransferencia = $2`,
+      [idmovimiento, idtransferencia]
+    );
+
+    // Actualizar saldo de la caja (se incrementa)
+    await client.query(
+      `UPDATE caja SET total = $1 WHERE idcaja = $2`,
+      [nuevoSaldo, data.idcaja_origen]
+    );
+
     await client.query("COMMIT");
     
     return { 
       idtransferencia, 
       estado: 'observada',
-      mensaje: 'Transferencia rechazada correctamente'
+      mensaje: 'Transferencia rechazada. Se devolvió el dinero a la caja.',
+      saldo_anterior: saldoActual,
+      saldo_actual: nuevoSaldo,
+      monto_revertido: montoTransferencia,
+      idmovimiento_reversion: idmovimiento
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -283,6 +400,8 @@ exports.getTransferenciaById = async (idtransferencia) => {
         t.observacion,
         t.idusuario_solicitante,
         t.idusuario_aprobador,
+        t.idmovimiento_egreso,
+        t.idmovimiento_reversion,
         u_sol.nombres || ' ' || u_sol.apellidos as usuario_origen,
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
