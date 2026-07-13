@@ -20,8 +20,6 @@ exports.getTransferencias = async (idusuario, rol) => {
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
         c_origen.tipo as tipo_origen,
-        t.idmovimiento_egreso,
-        t.idmovimiento_reversion,
         c_origen.idbodega as bodega_origen
       FROM transferencias_caja t
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
@@ -164,14 +162,6 @@ exports.crearTransferencia = async (data) => {
       ]
     );
 
-    const idmovimiento = movimientoResult.rows[0].idmovimiento_caja;
-
-    // Guardar el ID del movimiento de egreso en la transferencia
-    await client.query(
-      `UPDATE transferencias_caja SET idmovimiento_egreso = $1 WHERE idtransferencia = $2`,
-      [idmovimiento, idtransferencia]
-    );
-
     // Actualizar saldo de la caja
     await client.query(
       `UPDATE caja SET total = $1 WHERE idcaja = $2`,
@@ -187,7 +177,6 @@ exports.crearTransferencia = async (data) => {
       saldo_anterior: saldoOrigen,
       saldo_actual: nuevoSaldo,
       monto_descontado: montoTransferencia,
-      idmovimiento_egreso: idmovimiento
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -231,8 +220,8 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador, idbo
     await client.query(
       `UPDATE movimiento_caja 
        SET descripcion = $1 
-       WHERE idmovimiento_caja = $2`,
-      [`Transferencia APROBADA - ${data.descripcion}`, data.idmovimiento_egreso]
+       WHERE idtransferencia = $2`,
+      [`Transferencia APROBADA - ${data.descripcion}`, data.idtransferencia]
     );
 
     // ============================================
@@ -328,18 +317,12 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
       [idusuario_aprobador, observacion || 'Transferencia observada', idtransferencia]
     );
 
-    // ============================================
-    // ANULAR EL EGRESO ORIGINAL - CAMBIAR TIPO A 'ingreso'
-    // Esto revierte el egreso y lo convierte en ingreso
-    // ============================================
-    // Obtener el saldo anterior del movimiento original
-    const movimientoOriginal = await client.query(
-      `SELECT monto_anterior FROM movimiento_caja WHERE idmovimiento_caja = $1`,
-      [data.idmovimiento_egreso]
+    const result = await client.query(
+      `UPDATE caja SET total = total + $1 WHERE idcaja = $2 RETURNING total`,
+      [montoTransferencia, data.idcaja_origen]
     );
-    
-    const saldoAnterior = movimientoOriginal.rows.length > 0 ? parseFloat(movimientoOriginal.rows[0].monto_anterior) : 0;
-    const saldoRestaurado = saldoAnterior;
+
+    const nuevoTotal = result.rows[0].total;
 
     // Cambiar el movimiento de egreso a ingreso (reversión)
     await client.query(
@@ -347,21 +330,13 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
        SET tipo = 'ingreso',
            descripcion = $1,
            monto_actual = $2
-       WHERE idmovimiento_caja = $3`,
+       WHERE idtransferencia = $3`,
       [
         `Transferencia OBSERVADA - Reversión - Motivo: ${observacion || 'Sin motivo'}`,
-        saldoRestaurado,
-        data.idmovimiento_egreso
+        nuevoTotal,
+        data.idtransferencia
       ]
     );
-
-    // Actualizar el saldo de la caja del asistente (volver al saldo anterior)
-    await client.query(
-      `UPDATE caja SET total = $1 WHERE idcaja = $2`,
-      [saldoRestaurado, data.idcaja_origen]
-    );
-
-    console.log(`✅ Transferencia observada. Se anuló el egreso y se restauró el saldo de la caja ${tipo} del asistente.`);
 
     await client.query("COMMIT");
     
@@ -369,7 +344,7 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
       idtransferencia, 
       estado: 'observada',
       mensaje: `Transferencia observada. Se anuló el egreso y se devolvió el dinero a la caja ${tipo} del asistente.`,
-      saldo_restaurado: saldoRestaurado,
+      saldo_restaurado: nuevoTotal,
       monto_revertido: montoTransferencia,
       observacion: observacion
     };
@@ -401,8 +376,6 @@ exports.getTransferenciaById = async (idtransferencia) => {
         t.observacion,
         t.idusuario_solicitante,
         t.idusuario_aprobador,
-        t.idmovimiento_egreso,
-        t.idmovimiento_reversion,
         u_sol.nombres || ' ' || u_sol.apellidos as usuario_origen,
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
