@@ -1,5 +1,20 @@
 // src/controllers/TransferenciaController.js
 const transferenciaService = require("../services/TransferenciaService");
+const { query } = require("../../db");
+
+// Función auxiliar para obtener la bodega de un usuario
+const getBodegaByUsuario = async (idusuario) => {
+  try {
+    const result = await query(
+      `SELECT idbodega FROM usuarios WHERE idusuario = $1`,
+      [idusuario]
+    );
+    return result.rows.length > 0 ? result.rows[0].idbodega : null;
+  } catch (error) {
+    console.error("Error en getBodegaByUsuario:", error);
+    return null;
+  }
+};
 
 exports.getTransferencias = async (req, res) => {
   try {
@@ -73,9 +88,17 @@ exports.aprobarTransferencia = async (req, res) => {
       return res.status(401).json({ error: "Se requiere ID de usuario aprobador" });
     }
 
+    // Obtener la bodega del administrador que está aprobando
+    const idbodega_admin = await getBodegaByUsuario(idusuario_aprobador);
+    
+    if (!idbodega_admin) {
+      return res.status(400).json({ error: "El administrador no tiene una bodega asignada" });
+    }
+
     const resultado = await transferenciaService.aprobarTransferencia(
       idtransferencia, 
-      idusuario_aprobador
+      idusuario_aprobador,
+      idbodega_admin  // Pasamos la bodega del admin
     );
     res.json(resultado);
   } catch (error) {

@@ -175,9 +175,9 @@ exports.registrarMovimientoCaja = async (idcaja, idusuario, monto, tipo, descrip
     const montoAnterior = cajaActual.rows.length > 0 ? parseFloat(cajaActual.rows[0].total) : 0;
     let montoActual = montoAnterior;
 
-    if (tipo === 'ingreso' || tipo === 'apertura') {
+    if (tipo === 'ingreso') {
       montoActual = montoAnterior + parseFloat(monto);
-    } else if (tipo === 'egreso' || tipo === 'cierre') {
+    } else if (tipo === 'egreso') {
       montoActual = montoAnterior - parseFloat(monto);
     }
 
@@ -232,6 +232,7 @@ exports.abrirCaja = async (idcaja, idusuario, montoInicial, descripcion = 'Apert
     const montoApertura = parseFloat(montoInicial) || 0;
     const diferencia = montoApertura - saldoActual;
 
+    // Registrar apertura (NO se suma a los ingresos del día)
     await client.query(
       `INSERT INTO movimiento_caja 
        (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual) 
@@ -300,6 +301,7 @@ exports.cerrarCaja = async (idcaja, idusuario, montoCierre = null, descripcion =
     const montoFinal = montoCierre !== null ? parseFloat(montoCierre) : saldoActual;
     const diferencia = montoFinal - saldoActual;
 
+    // Registrar cierre (NO se resta de los egresos del día)
     await client.query(
       `INSERT INTO movimiento_caja 
        (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual) 

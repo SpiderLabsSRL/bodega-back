@@ -21,7 +21,8 @@ exports.getTransferencias = async (idusuario, rol) => {
         c_origen.nombre as caja_origen,
         c_origen.tipo as tipo_origen,
         t.idmovimiento_egreso,
-        t.idmovimiento_reversion
+        t.idmovimiento_reversion,
+        c_origen.idbodega as bodega_origen
       FROM transferencias_caja t
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
       LEFT JOIN usuarios u_apr ON t.idusuario_aprobador = u_apr.idusuario
@@ -49,7 +50,30 @@ exports.getTransferencias = async (idusuario, rol) => {
   }
 };
 
-// Crear una transferencia - DESCUENTA INMEDIATAMENTE DE LA CAJA
+// Función para obtener o crear caja del administrador
+const getOrCreateCajaAdmin = async (client, idbodega, tipo) => {
+  const cajaResult = await client.query(
+    `SELECT idcaja, total, estado_caja FROM caja 
+     WHERE idbodega = $1 AND tipo = $2`,
+    [idbodega, tipo]
+  );
+
+  if (cajaResult.rows.length > 0) {
+    return cajaResult.rows[0];
+  }
+
+  const nombre = tipo === 'Efectivo' ? 'Caja Efectivo' : 'Caja QR';
+  const newCaja = await client.query(
+    `INSERT INTO caja (nombre, tipo, estado_caja, total, idbodega) 
+     VALUES ($1, $2, 'cerrada', 0, $3) 
+     RETURNING idcaja, total, estado_caja`,
+    [nombre, tipo, idbodega]
+  );
+
+  return newCaja.rows[0];
+};
+
+// Crear una transferencia - DESCUENTA DE LA CAJA DEL ASISTENTE (EGRESO)
 exports.crearTransferencia = async (data) => {
   const { 
     idcaja_origen, 
@@ -93,7 +117,7 @@ exports.crearTransferencia = async (data) => {
 
     const idtransferencia = transferenciaResult.rows[0].idtransferencia;
 
-    // 2. DESCONTAR INMEDIATAMENTE DE LA CAJA
+    // 2. DESCONTAR DE LA CAJA DEL ASISTENTE (EGRESO)
     const nuevoSaldo = saldoOrigen - montoTransferencia;
 
     const movimientoResult = await client.query(
@@ -114,7 +138,7 @@ exports.crearTransferencia = async (data) => {
 
     const idmovimiento = movimientoResult.rows[0].idmovimiento_caja;
 
-    // Guardar el ID del movimiento de egreso
+    // Guardar el ID del movimiento de egreso en la transferencia
     await client.query(
       `UPDATE transferencias_caja SET idmovimiento_egreso = $1 WHERE idtransferencia = $2`,
       [idmovimiento, idtransferencia]
@@ -131,7 +155,7 @@ exports.crearTransferencia = async (data) => {
     return { 
       idtransferencia, 
       estado: 'pendiente',
-      mensaje: 'Transferencia registrada. Se descontó de la caja. Pendiente de aprobación.',
+      mensaje: 'Transferencia registrada. Se descontó de la caja del asistente. Pendiente de aprobación.',
       saldo_anterior: saldoOrigen,
       saldo_actual: nuevoSaldo,
       monto_descontado: montoTransferencia,
@@ -145,8 +169,8 @@ exports.crearTransferencia = async (data) => {
   }
 };
 
-// Aprobar transferencia - YA ESTÁ DESCONTADA, SOLO CAMBIA ESTADO
-exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
+// Aprobar transferencia - INGRESO A LA CAJA DEL ADMINISTRADOR
+exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador, idbodega_admin) => {
   const client = await pool.connect();
   
   try {
@@ -162,6 +186,8 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
     }
 
     const data = transferencia.rows[0];
+    const montoTransferencia = parseFloat(data.monto);
+    const tipo = data.tipo; // 'Efectivo' o 'QR'
 
     // Actualizar estado de la transferencia a 'aprobada'
     await client.query(
@@ -173,7 +199,7 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
       [idusuario_aprobador, idtransferencia]
     );
 
-    // Actualizar la descripción del movimiento de egreso
+    // Actualizar la descripción del movimiento de egreso (caja del asistente)
     await client.query(
       `UPDATE movimiento_caja 
        SET descripcion = $1 
@@ -181,13 +207,60 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
       [`Transferencia APROBADA - ${data.descripcion}`, data.idmovimiento_egreso]
     );
 
+    // ============================================
+    // INGRESO A LA CAJA DEL ADMINISTRADOR (TIPO 'ingreso')
+    // Usamos la bodega del administrador que pasamos como parámetro
+    // ============================================
+    console.log(`💰 Sumando transferencia a la caja del Admin - Bodega: ${idbodega_admin}, Tipo: ${tipo}, Monto: ${montoTransferencia}`);
+
+    // Obtener o crear la caja del administrador en su bodega
+    const cajaAdmin = await getOrCreateCajaAdmin(client, idbodega_admin, tipo);
+    console.log(`📦 Caja Admin encontrada/creada:`, cajaAdmin);
+
+    // Obtener saldo actual de la caja del admin
+    const cajaAdminActual = await client.query(
+      `SELECT total FROM caja WHERE idcaja = $1`,
+      [cajaAdmin.idcaja]
+    );
+    const saldoAdminActual = cajaAdminActual.rows.length > 0 ? parseFloat(cajaAdminActual.rows[0].total) : 0;
+    const nuevoSaldoAdmin = saldoAdminActual + montoTransferencia;
+
+    // Registrar INGRESO en la caja del administrador (TIPO 'ingreso')
+    await client.query(
+      `INSERT INTO movimiento_caja 
+       (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
+       VALUES ($1, $2, $3, 'ingreso', $4, $5, $6, $7)`,
+      [
+        cajaAdmin.idcaja, 
+        idusuario_aprobador, 
+        montoTransferencia, 
+        `Transferencia APROBADA - ${data.descripcion}`,
+        saldoAdminActual,
+        nuevoSaldoAdmin,
+        idtransferencia
+      ]
+    );
+
+    // Actualizar saldo de la caja del administrador
+    await client.query(
+      `UPDATE caja SET total = $1 WHERE idcaja = $2`,
+      [nuevoSaldoAdmin, cajaAdmin.idcaja]
+    );
+
+    console.log(`✅ Transferencia sumada a la caja del Admin. Nuevo saldo de caja ${tipo}: +${montoTransferencia}`);
+
     await client.query("COMMIT");
     
     return { 
       idtransferencia, 
       estado: 'aprobada',
-      mensaje: 'Transferencia aprobada correctamente',
-      saldo_actual: parseFloat(data.monto) // El saldo ya está descontado
+      mensaje: 'Transferencia aprobada correctamente. Se sumó a la caja del administrador.',
+      monto: montoTransferencia,
+      caja_admin: cajaAdmin.idcaja,
+      bodega_admin: idbodega_admin,
+      tipo: tipo,
+      saldo_admin_anterior: saldoAdminActual,
+      saldo_admin_actual: nuevoSaldoAdmin
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -197,8 +270,8 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador) => {
   }
 };
 
-// Rechazar transferencia - REVERSIÓN (DEVOLVER DINERO A LA CAJA)
-exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, motivo) => {
+// OBSERVAR transferencia - ANULAR EGRESO Y DEVOLVER DINERO A LA CAJA DEL ASISTENTE (INGRESO)
+exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, observacion) => {
   const client = await pool.connect();
   
   try {
@@ -214,8 +287,9 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
     }
 
     const data = transferencia.rows[0];
+    const montoTransferencia = parseFloat(data.monto);
 
-    // Actualizar estado de la transferencia a 'observada' (rechazada)
+    // Actualizar estado de la transferencia a 'observada'
     await client.query(
       `UPDATE transferencias_caja 
        SET estado = 'observada', 
@@ -223,10 +297,27 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
            idusuario_aprobador = $1,
            observacion = $2
        WHERE idtransferencia = $3`,
-      [idusuario_aprobador, motivo || 'Transferencia rechazada', idtransferencia]
+      [idusuario_aprobador, observacion || 'Transferencia observada', idtransferencia]
     );
 
-    // Obtener saldo actual de la caja
+    // ============================================
+    // ANULAR EL EGRESO ORIGINAL - CAMBIAR TIPO A 'ingreso'
+    // ============================================
+    // El movimiento de egreso original se convierte en ingreso (reversión)
+    // Esto hace que en la vista ya no aparezca como egreso, sino como ingreso
+    await client.query(
+      `UPDATE movimiento_caja 
+       SET tipo = 'ingreso',
+           descripcion = $1,
+           monto_actual = monto_anterior + monto
+       WHERE idmovimiento_caja = $2`,
+      [
+        `Transferencia OBSERVADA - Reversión - Motivo: ${observacion || 'Sin motivo'}`,
+        data.idmovimiento_egreso
+      ]
+    );
+
+    // Actualizar el saldo de la caja del asistente (volver al saldo anterior)
     const cajaOrigen = await client.query(
       `SELECT idcaja, total FROM caja WHERE idcaja = $1`,
       [data.idcaja_origen]
@@ -237,39 +328,21 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
     }
 
     const saldoActual = parseFloat(cajaOrigen.rows[0].total);
-    const montoTransferencia = parseFloat(data.monto);
-    
-    // DEVOLVER EL DINERO A LA CAJA (REVERSIÓN - SE REGISTRA COMO INGRESO)
+    // Como el egreso ya descontó, ahora sumamos para devolver
     const nuevoSaldo = saldoActual + montoTransferencia;
 
-    const movimientoResult = await client.query(
-      `INSERT INTO movimiento_caja 
-       (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
-       VALUES ($1, $2, $3, 'ingreso', $4, $5, $6, $7)
-       RETURNING idmovimiento_caja`,
-      [
-        data.idcaja_origen, 
-        idusuario_aprobador, 
-        montoTransferencia, 
-        `Transferencia Rechazada - ${data.descripcion}`,
-        saldoActual,
-        nuevoSaldo,
-        idtransferencia
-      ]
-    );
-
-    const idmovimiento = movimientoResult.rows[0].idmovimiento_caja;
-
-    // Guardar el ID del movimiento de reversión
-    await client.query(
-      `UPDATE transferencias_caja SET idmovimiento_reversion = $1 WHERE idtransferencia = $2`,
-      [idmovimiento, idtransferencia]
-    );
-
-    // Actualizar saldo de la caja (se incrementa)
+    // Actualizar saldo de la caja del asistente (se incrementa)
     await client.query(
       `UPDATE caja SET total = $1 WHERE idcaja = $2`,
       [nuevoSaldo, data.idcaja_origen]
+    );
+
+    // También actualizar el monto_actual del movimiento anulado
+    await client.query(
+      `UPDATE movimiento_caja 
+       SET monto_actual = $1 
+       WHERE idmovimiento_caja = $2`,
+      [nuevoSaldo, data.idmovimiento_egreso]
     );
 
     await client.query("COMMIT");
@@ -277,11 +350,10 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
     return { 
       idtransferencia, 
       estado: 'observada',
-      mensaje: 'Transferencia rechazada. Se devolvió el dinero a la caja.',
-      saldo_anterior: saldoActual,
+      mensaje: 'Transferencia observada. Se anuló el egreso y se devolvió el dinero a la caja del asistente.',
       saldo_actual: nuevoSaldo,
       monto_revertido: montoTransferencia,
-      idmovimiento_reversion: idmovimiento
+      observacion: observacion
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -289,6 +361,12 @@ exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, mot
   } finally {
     client.release();
   }
+};
+
+// Rechazar transferencia (alias de observar) - ANULAR EGRESO Y DEVOLVER DINERO A LA CAJA DEL ASISTENTE
+exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, motivo) => {
+  // Reutilizar la función de observar
+  return exports.observarTransferencia(idtransferencia, idusuario_aprobador, motivo);
 };
 
 // Obtener transferencia por ID
@@ -312,7 +390,7 @@ exports.getTransferenciaById = async (idtransferencia) => {
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
         c_origen.tipo as tipo_origen,
-        c_origen.idbodega
+        c_origen.idbodega as bodega_origen
       FROM transferencias_caja t
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
       LEFT JOIN usuarios u_apr ON t.idusuario_aprobador = u_apr.idusuario
@@ -345,7 +423,8 @@ exports.getTransferenciasPendientes = async () => {
         u_sol.nombres || ' ' || u_sol.apellidos as usuario_origen,
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
-        c_origen.tipo as tipo_origen
+        c_origen.tipo as tipo_origen,
+        c_origen.idbodega as bodega_origen
       FROM transferencias_caja t
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
       LEFT JOIN usuarios u_apr ON t.idusuario_aprobador = u_apr.idusuario
@@ -378,7 +457,8 @@ exports.getTransferenciasByUsuario = async (idusuario) => {
         u_sol.nombres || ' ' || u_sol.apellidos as usuario_origen,
         u_apr.nombres || ' ' || u_apr.apellidos as usuario_aprobador,
         c_origen.nombre as caja_origen,
-        c_origen.tipo as tipo_origen
+        c_origen.tipo as tipo_origen,
+        c_origen.idbodega as bodega_origen
       FROM transferencias_caja t
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
       LEFT JOIN usuarios u_apr ON t.idusuario_aprobador = u_apr.idusuario

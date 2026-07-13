@@ -57,27 +57,27 @@ const ventasService = {
         queryParams.push(filtros.bodega);
       }
 
-      // Filtro por fecha específica
+      // Filtro por fecha específica - SIN CONVERSIÓN DE ZONA HORARIA
       if (filtros.fechaEspecifica) {
         paramCount++;
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = $${paramCount}`);
+        whereConditions.push(`DATE(v.fecha_hora) = $${paramCount}`);
         queryParams.push(filtros.fechaEspecifica);
       }
 
-      // Filtro por rango de fechas
+      // Filtro por rango de fechas - SIN CONVERSIÓN DE ZONA HORARIA
       if (filtros.fechaInicio && filtros.fechaFin) {
         paramCount++;
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') >= $${paramCount}`);
+        whereConditions.push(`DATE(v.fecha_hora) >= $${paramCount}`);
         queryParams.push(filtros.fechaInicio);
         
         paramCount++;
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') <= $${paramCount}`);
+        whereConditions.push(`DATE(v.fecha_hora) <= $${paramCount}`);
         queryParams.push(filtros.fechaFin);
       }
 
-      // Si no hay filtros de fecha, mostrar solo ventas de hoy por defecto
+      // Si no hay filtros de fecha, mostrar solo ventas de hoy por defecto - SIN CONVERSIÓN
       if (!filtros.fechaEspecifica && !filtros.fechaInicio) {
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = CURRENT_DATE`);
+        whereConditions.push(`DATE(v.fecha_hora) = CURRENT_DATE`);
       }
 
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
@@ -163,27 +163,27 @@ const ventasService = {
         queryParams.push(filtros.bodega);
       }
 
-      // Filtro por fecha específica
+      // Filtro por fecha específica - SIN CONVERSIÓN DE ZONA HORARIA
       if (filtros.fechaEspecifica) {
         paramCount++;
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = $${paramCount}`);
+        whereConditions.push(`DATE(v.fecha_hora) = $${paramCount}`);
         queryParams.push(filtros.fechaEspecifica);
       }
 
-      // Filtro por rango de fechas
+      // Filtro por rango de fechas - SIN CONVERSIÓN DE ZONA HORARIA
       if (filtros.fechaInicio && filtros.fechaFin) {
         paramCount++;
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') >= $${paramCount}`);
+        whereConditions.push(`DATE(v.fecha_hora) >= $${paramCount}`);
         queryParams.push(filtros.fechaInicio);
         
         paramCount++;
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') <= $${paramCount}`);
+        whereConditions.push(`DATE(v.fecha_hora) <= $${paramCount}`);
         queryParams.push(filtros.fechaFin);
       }
 
-      // Si no hay filtros de fecha, mostrar solo ventas de hoy por defecto
+      // Si no hay filtros de fecha, mostrar solo ventas de hoy por defecto - SIN CONVERSIÓN
       if (!filtros.fechaEspecifica && !filtros.fechaInicio) {
-        whereConditions.push(`DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = CURRENT_DATE`);
+        whereConditions.push(`DATE(v.fecha_hora) = CURRENT_DATE`);
       }
 
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
@@ -228,7 +228,7 @@ const ventasService = {
         INNER JOIN usuarios u ON v.idusuario = u.idusuario
         LEFT JOIN bodegas b ON v.idbodega = b.idbodega
         LEFT JOIN clientes c ON v.idcliente = c.idcliente
-        WHERE DATE(v.fecha_hora AT TIME ZONE 'America/La_Paz') = CURRENT_DATE
+        WHERE DATE(v.fecha_hora) = CURRENT_DATE
           AND u.usuario = $1
         ORDER BY v.fecha_hora DESC
       `;
