@@ -50,8 +50,8 @@ exports.getTransferencias = async (idusuario, rol) => {
   }
 };
 
-// Función para obtener o crear caja del administrador
-const getOrCreateCajaAdmin = async (client, idbodega, tipo) => {
+// Función para obtener o crear caja (tanto Efectivo como QR)
+const getOrCreateCaja = async (client, idbodega, tipo) => {
   const cajaResult = await client.query(
     `SELECT idcaja, total, estado_caja FROM caja 
      WHERE idbodega = $1 AND tipo = $2`,
@@ -71,6 +71,30 @@ const getOrCreateCajaAdmin = async (client, idbodega, tipo) => {
   );
 
   return newCaja.rows[0];
+};
+
+// Verificar caja abierta - SOLO para Efectivo (QR no se verifica)
+const verificarCajaAbierta = async (client, idcaja, tipo) => {
+  // QR no tiene estado de apertura/cierre, siempre se permite
+  if (tipo === 'QR') {
+    return true;
+  }
+  
+  // Solo Efectivo verifica estado
+  const result = await client.query(
+    `SELECT estado_caja FROM caja WHERE idcaja = $1`,
+    [idcaja]
+  );
+  
+  if (result.rows.length === 0) {
+    throw new Error("No se encontró la caja");
+  }
+  
+  if (result.rows[0].estado_caja !== 'abierta') {
+    throw new Error("La caja de Efectivo está cerrada. No se pueden realizar transferencias.");
+  }
+  
+  return true;
 };
 
 // Crear una transferencia - DESCUENTA DE LA CAJA DEL ASISTENTE (EGRESO)
@@ -98,8 +122,12 @@ exports.crearTransferencia = async (data) => {
       throw new Error("La caja de origen no existe");
     }
 
+    const tipoCaja = cajaOrigen.rows[0].tipo;
     const saldoOrigen = parseFloat(cajaOrigen.rows[0].total);
     const montoTransferencia = parseFloat(monto);
+
+    // Verificar que la caja esté abierta (SOLO para Efectivo)
+    await verificarCajaAbierta(client, idcaja_origen, tipoCaja);
 
     // Verificar que haya saldo suficiente
     if (saldoOrigen < montoTransferencia) {
@@ -155,7 +183,7 @@ exports.crearTransferencia = async (data) => {
     return { 
       idtransferencia, 
       estado: 'pendiente',
-      mensaje: 'Transferencia registrada. Se descontó de la caja del asistente. Pendiente de aprobación.',
+      mensaje: `Transferencia registrada. Se descontó de la caja ${tipo} del asistente. Pendiente de aprobación.`,
       saldo_anterior: saldoOrigen,
       saldo_actual: nuevoSaldo,
       monto_descontado: montoTransferencia,
@@ -208,13 +236,12 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador, idbo
     );
 
     // ============================================
-    // INGRESO A LA CAJA DEL ADMINISTRADOR (TIPO 'ingreso')
-    // Usamos la bodega del administrador que pasamos como parámetro
+    // INGRESO A LA CAJA DEL ADMINISTRADOR
     // ============================================
     console.log(`💰 Sumando transferencia a la caja del Admin - Bodega: ${idbodega_admin}, Tipo: ${tipo}, Monto: ${montoTransferencia}`);
 
     // Obtener o crear la caja del administrador en su bodega
-    const cajaAdmin = await getOrCreateCajaAdmin(client, idbodega_admin, tipo);
+    const cajaAdmin = await getOrCreateCaja(client, idbodega_admin, tipo);
     console.log(`📦 Caja Admin encontrada/creada:`, cajaAdmin);
 
     // Obtener saldo actual de la caja del admin
@@ -225,7 +252,7 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador, idbo
     const saldoAdminActual = cajaAdminActual.rows.length > 0 ? parseFloat(cajaAdminActual.rows[0].total) : 0;
     const nuevoSaldoAdmin = saldoAdminActual + montoTransferencia;
 
-    // Registrar INGRESO en la caja del administrador (TIPO 'ingreso')
+    // Registrar INGRESO en la caja del administrador
     await client.query(
       `INSERT INTO movimiento_caja 
        (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idtransferencia) 
@@ -254,7 +281,7 @@ exports.aprobarTransferencia = async (idtransferencia, idusuario_aprobador, idbo
     return { 
       idtransferencia, 
       estado: 'aprobada',
-      mensaje: 'Transferencia aprobada correctamente. Se sumó a la caja del administrador.',
+      mensaje: `Transferencia aprobada correctamente. Se sumó a la caja ${tipo} del administrador.`,
       monto: montoTransferencia,
       caja_admin: cajaAdmin.idcaja,
       bodega_admin: idbodega_admin,
@@ -288,6 +315,7 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
 
     const data = transferencia.rows[0];
     const montoTransferencia = parseFloat(data.monto);
+    const tipo = data.tipo;
 
     // Actualizar estado de la transferencia a 'observada'
     await client.query(
@@ -302,56 +330,46 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
 
     // ============================================
     // ANULAR EL EGRESO ORIGINAL - CAMBIAR TIPO A 'ingreso'
+    // Esto revierte el egreso y lo convierte en ingreso
     // ============================================
-    // El movimiento de egreso original se convierte en ingreso (reversión)
-    // Esto hace que en la vista ya no aparezca como egreso, sino como ingreso
+    // Obtener el saldo anterior del movimiento original
+    const movimientoOriginal = await client.query(
+      `SELECT monto_anterior FROM movimiento_caja WHERE idmovimiento_caja = $1`,
+      [data.idmovimiento_egreso]
+    );
+    
+    const saldoAnterior = movimientoOriginal.rows.length > 0 ? parseFloat(movimientoOriginal.rows[0].monto_anterior) : 0;
+    const saldoRestaurado = saldoAnterior;
+
+    // Cambiar el movimiento de egreso a ingreso (reversión)
     await client.query(
       `UPDATE movimiento_caja 
        SET tipo = 'ingreso',
            descripcion = $1,
-           monto_actual = monto_anterior + monto
-       WHERE idmovimiento_caja = $2`,
+           monto_actual = $2
+       WHERE idmovimiento_caja = $3`,
       [
         `Transferencia OBSERVADA - Reversión - Motivo: ${observacion || 'Sin motivo'}`,
+        saldoRestaurado,
         data.idmovimiento_egreso
       ]
     );
 
     // Actualizar el saldo de la caja del asistente (volver al saldo anterior)
-    const cajaOrigen = await client.query(
-      `SELECT idcaja, total FROM caja WHERE idcaja = $1`,
-      [data.idcaja_origen]
-    );
-
-    if (cajaOrigen.rows.length === 0) {
-      throw new Error("Caja de origen no encontrada");
-    }
-
-    const saldoActual = parseFloat(cajaOrigen.rows[0].total);
-    // Como el egreso ya descontó, ahora sumamos para devolver
-    const nuevoSaldo = saldoActual + montoTransferencia;
-
-    // Actualizar saldo de la caja del asistente (se incrementa)
     await client.query(
       `UPDATE caja SET total = $1 WHERE idcaja = $2`,
-      [nuevoSaldo, data.idcaja_origen]
+      [saldoRestaurado, data.idcaja_origen]
     );
 
-    // También actualizar el monto_actual del movimiento anulado
-    await client.query(
-      `UPDATE movimiento_caja 
-       SET monto_actual = $1 
-       WHERE idmovimiento_caja = $2`,
-      [nuevoSaldo, data.idmovimiento_egreso]
-    );
+    console.log(`✅ Transferencia observada. Se anuló el egreso y se restauró el saldo de la caja ${tipo} del asistente.`);
 
     await client.query("COMMIT");
     
     return { 
       idtransferencia, 
       estado: 'observada',
-      mensaje: 'Transferencia observada. Se anuló el egreso y se devolvió el dinero a la caja del asistente.',
-      saldo_actual: nuevoSaldo,
+      mensaje: `Transferencia observada. Se anuló el egreso y se devolvió el dinero a la caja ${tipo} del asistente.`,
+      saldo_restaurado: saldoRestaurado,
       monto_revertido: montoTransferencia,
       observacion: observacion
     };
@@ -365,7 +383,6 @@ exports.observarTransferencia = async (idtransferencia, idusuario_aprobador, obs
 
 // Rechazar transferencia (alias de observar) - ANULAR EGRESO Y DEVOLVER DINERO A LA CAJA DEL ASISTENTE
 exports.rechazarTransferencia = async (idtransferencia, idusuario_aprobador, motivo) => {
-  // Reutilizar la función de observar
   return exports.observarTransferencia(idtransferencia, idusuario_aprobador, motivo);
 };
 
