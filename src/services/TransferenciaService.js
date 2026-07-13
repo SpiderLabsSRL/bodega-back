@@ -2,8 +2,32 @@
 const { query, pool } = require("../../db");
 
 // Obtener transferencias según el rol del usuario
-exports.getTransferencias = async (idusuario, rol) => {
+exports.getTransferencias = async (filtros) => {
   try {
+    const { idusuario, fecha, fechaInicio, fechaFin } = filtros;
+
+    const condiciones = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (idusuario) {
+      condiciones.push(`t.idusuario_solicitante = $${paramIndex}`);
+      values.push(idusuario);
+      paramIndex++;
+    }
+
+    if (fechaInicio && fechaFin) {
+      condiciones.push(`DATE(t.fecha_solicitud) BETWEEN $${paramIndex} AND $${paramIndex + 1}`);
+      values.push(fechaInicio, fechaFin);
+      paramIndex += 2;
+    } else if (fecha) {
+      condiciones.push(`DATE(t.fecha_solicitud) = $${paramIndex}`);
+      values.push(fecha);
+      paramIndex++;
+    }
+
+    const whereClause = condiciones.length > 0 ? `WHERE ${condiciones.join(" AND ")}` : "";
+
     let sql = `
       SELECT 
         t.idtransferencia as id,
@@ -25,22 +49,13 @@ exports.getTransferencias = async (idusuario, rol) => {
       JOIN usuarios u_sol ON t.idusuario_solicitante = u_sol.idusuario
       LEFT JOIN usuarios u_apr ON t.idusuario_aprobador = u_apr.idusuario
       JOIN caja c_origen ON t.idcaja_origen = c_origen.idcaja
-      WHERE 1=1
+      ${whereClause}
+      ORDER BY 
+        CASE WHEN t.estado = 'pendiente' THEN 0 ELSE 1 END,
+        t.fecha_solicitud DESC
     `;
 
-    const params = [];
-
-    if (rol === 'asistente') {
-      sql += ` AND t.idusuario_solicitante = $1`;
-      params.push(idusuario);
-    }
-
-    sql += ` ORDER BY 
-      CASE WHEN t.estado = 'pendiente' THEN 0 ELSE 1 END,
-      t.fecha_solicitud DESC
-    `;
-
-    const result = await query(sql, params);
+    const result = await query(sql, values);
     return result.rows;
   } catch (error) {
     console.error("Error en getTransferencias:", error);

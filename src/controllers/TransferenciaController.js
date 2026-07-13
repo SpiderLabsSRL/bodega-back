@@ -18,14 +18,15 @@ const getBodegaByUsuario = async (idusuario) => {
 
 exports.getTransferencias = async (req, res) => {
   try {
-    const userId = req.headers["user-id"] || req.query.userId;
-    const userRole = req.headers["user-role"] || req.query.userRole || "admin";
+    const { idusuario, fecha, fechaInicio, fechaFin } = req.query;
+    const filtros = {
+      idusuario,
+      fecha,
+      fechaInicio,
+      fechaFin,
+    };
 
-    if (!userId) {
-      return res.status(401).json({ error: "Se requiere ID de usuario" });
-    }
-
-    const transferencias = await transferenciaService.getTransferencias(userId, userRole);
+    const transferencias = await transferenciaService.getTransferencias(filtros);
     res.json(transferencias);
   } catch (error) {
     console.error("Error en getTransferencias:", error);
