@@ -32,6 +32,7 @@ const allowedOrigins = [
   "http://localhost:8080",
   "http://localhost:3000",
   "https://traxzioncochabamba.netlify.app",
+  "traxzion.spiderlabsystems.com",
   "https://bodega-back-wc9w.onrender.com",
 ];
 
