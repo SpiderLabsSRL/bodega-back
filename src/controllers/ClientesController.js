@@ -15,24 +15,26 @@ const createCliente = async (req, res) => {
   try {
     const { nombres, apellidos, carnet, celular, nota } = req.body;
     
-    // Validaciones básicas
-    if (!nombres || !apellidos || !carnet || !celular) {
-      return res.status(400).json({ error: "Los campos nombres, apellidos, carnet y celular son obligatorios" });
+    // Validaciones básicas - Solo nombres y apellidos son obligatorios
+    if (!nombres || !apellidos) {
+      return res.status(400).json({ error: "Los campos nombres y apellidos son obligatorios" });
     }
 
-    if (carnet.length < 4 || carnet.length > 20) {
+    // Validar carnet solo si fue proporcionado
+    if (carnet && (carnet.length < 4 || carnet.length > 20)) {
       return res.status(400).json({ error: "El carnet debe tener entre 4 y 20 caracteres" });
     }
 
-    if (celular.length < 7 || celular.length > 20) {
+    // Validar celular solo si fue proporcionado
+    if (celular && (celular.length < 7 || celular.length > 20)) {
       return res.status(400).json({ error: "El celular debe tener entre 7 y 20 caracteres" });
     }
 
     const nuevoCliente = await clientesService.createCliente({
       nombres,
       apellidos,
-      carnet,
-      celular,
+      carnet: carnet || null,
+      celular: celular || null,
       nota: nota || null,
     });
 
@@ -48,23 +50,25 @@ const updateCliente = async (req, res) => {
     const { id } = req.params;
     const { nombres, apellidos, carnet, celular, nota } = req.body;
 
-    if (!nombres || !apellidos || !carnet || !celular) {
-      return res.status(400).json({ error: "Los campos nombres, apellidos, carnet y celular son obligatorios" });
+    if (!nombres || !apellidos) {
+      return res.status(400).json({ error: "Los campos nombres y apellidos son obligatorios" });
     }
 
-    if (carnet.length < 4 || carnet.length > 20) {
+    // Validar carnet solo si fue proporcionado
+    if (carnet && (carnet.length < 4 || carnet.length > 20)) {
       return res.status(400).json({ error: "El carnet debe tener entre 4 y 20 caracteres" });
     }
 
-    if (celular.length < 7 || celular.length > 20) {
+    // Validar celular solo si fue proporcionado
+    if (celular && (celular.length < 7 || celular.length > 20)) {
       return res.status(400).json({ error: "El celular debe tener entre 7 y 20 caracteres" });
     }
 
     const clienteActualizado = await clientesService.updateCliente(parseInt(id), {
       nombres,
       apellidos,
-      carnet,
-      celular,
+      carnet: carnet || null,
+      celular: celular || null,
       nota: nota || null,
     });
 

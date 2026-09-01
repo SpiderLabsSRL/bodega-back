@@ -10,21 +10,23 @@ const getClientes = async () => {
 const createCliente = async (clienteData) => {
   const { nombres, apellidos, carnet, celular, nota } = clienteData;
 
-  // Verificar si el carnet ya existe
-  const carnetExistente = await query(
-    "SELECT idcliente FROM clientes WHERE carnet = $1 AND estado = 0",
-    [carnet]
-  );
+  // Si carnet no es null, verificar que no exista
+  if (carnet) {
+    const carnetExistente = await query(
+      "SELECT idcliente FROM clientes WHERE carnet = $1 AND estado = 0",
+      [carnet]
+    );
 
-  if (carnetExistente.rows.length > 0) {
-    throw new Error("El carnet ya está registrado");
+    if (carnetExistente.rows.length > 0) {
+      throw new Error("El carnet ya está registrado");
+    }
   }
 
   const result = await query(
     `INSERT INTO clientes (nombres, apellidos, carnet, celular, nota, estado) 
      VALUES ($1, $2, $3, $4, $5, 0) 
      RETURNING idcliente, nombres, apellidos, carnet, celular, nota, estado`,
-    [nombres, apellidos, carnet, celular, nota]
+    [nombres, apellidos, carnet || null, celular || null, nota || null]
   );
 
   return result.rows[0];
@@ -43,14 +45,16 @@ const updateCliente = async (id, clienteData) => {
     throw new Error("Cliente no encontrado");
   }
 
-  // Verificar si el carnet ya existe en otro cliente activo
-  const carnetDuplicado = await query(
-    "SELECT idcliente FROM clientes WHERE carnet = $1 AND idcliente != $2 AND estado = 0",
-    [carnet, id]
-  );
+  // Si carnet no es null, verificar que no exista en otro cliente
+  if (carnet) {
+    const carnetDuplicado = await query(
+      "SELECT idcliente FROM clientes WHERE carnet = $1 AND idcliente != $2 AND estado = 0",
+      [carnet, id]
+    );
 
-  if (carnetDuplicado.rows.length > 0) {
-    throw new Error("El carnet ya está registrado por otro cliente");
+    if (carnetDuplicado.rows.length > 0) {
+      throw new Error("El carnet ya está registrado por otro cliente");
+    }
   }
 
   const result = await query(
@@ -58,7 +62,7 @@ const updateCliente = async (id, clienteData) => {
      SET nombres = $1, apellidos = $2, carnet = $3, celular = $4, nota = $5 
      WHERE idcliente = $6 AND estado = 0
      RETURNING idcliente, nombres, apellidos, carnet, celular, nota, estado`,
-    [nombres, apellidos, carnet, celular, nota, id]
+    [nombres, apellidos, carnet || null, celular || null, nota || null, id]
   );
 
   if (result.rows.length === 0) {
@@ -69,7 +73,6 @@ const updateCliente = async (id, clienteData) => {
 };
 
 const deleteCliente = async (id) => {
-  // Cambiar estado a 1 (inactivo)
   const result = await query(
     "UPDATE clientes SET estado = 1 WHERE idcliente = $1 AND estado = 0 RETURNING idcliente",
     [id]
