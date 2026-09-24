@@ -2,7 +2,6 @@
 const productsService = require("../services/productsService");
 
 const productsController = {
-  // Obtener opciones de selección - FILTRADO POR BODEGA
   getUbicaciones: async (req, res) => {
     try {
       const { bodega } = req.query;
@@ -36,13 +35,11 @@ const productsController = {
     try {
       const { termino, bodega } = req.query;
       let productos;
-
       if (termino && termino.trim().length >= 2) {
         productos = await productsService.buscarProductos(termino, bodega);
       } else {
         productos = [];
       }
-
       res.json(productos);
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -65,7 +62,6 @@ const productsController = {
       if (!termino || termino.trim().length < 2) {
         return res.json([]);
       }
-
       const productos = await productsService.buscarProductos(termino, bodega);
       res.json(productos);
     } catch (error) {
@@ -77,10 +73,45 @@ const productsController = {
     try {
       const { id } = req.params;
       const { bodega } = req.query;
-      const producto = await productsService.getProductoById(parseInt(id), bodega);
+      const producto = await productsService.getProductoById(
+        parseInt(id),
+        bodega,
+      );
       res.json(producto);
     } catch (error) {
       res.status(500).json({ error: error.message });
+    }
+  },
+
+  // ============================================
+  // ENDPOINT DE IMAGEN (cacheable por el navegador)
+  // ============================================
+  getProductoImagen: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const imagen = await productsService.getProductoImagen(parseInt(id));
+
+      if (!imagen) {
+        return res.status(404).send("Imagen no encontrada");
+      }
+
+      // Detectar tipo de imagen por magic bytes
+      let contentType = "image/jpeg";
+      if (imagen.length >= 4) {
+        if (imagen[0] === 0x89 && imagen[1] === 0x50) contentType = "image/png";
+        else if (imagen[0] === 0x47 && imagen[1] === 0x49) contentType = "image/gif";
+        else if (imagen[0] === 0x52 && imagen[1] === 0x49) contentType = "image/webp";
+      }
+
+      res.set({
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=86400, immutable",
+        "Content-Length": imagen.length,
+      });
+      res.send(imagen);
+    } catch (error) {
+      console.error("Error obteniendo imagen:", error);
+      res.status(500).send("Error obteniendo imagen");
     }
   },
 
@@ -101,11 +132,8 @@ const productsController = {
       };
 
       let imagenFile = null;
-      if (req.file) {
-        imagenFile = req.file;
-      } else if (req.files && req.files.imagen) {
-        imagenFile = req.files.imagen;
-      }
+      if (req.file) imagenFile = req.file;
+      else if (req.files && req.files.imagen) imagenFile = req.files.imagen;
 
       const producto = await productsService.createProducto(
         productoData,
@@ -121,7 +149,6 @@ const productsController = {
   updateProducto: async (req, res) => {
     try {
       const { id } = req.params;
-
       const productoData = {
         nombre: req.body.nombre,
         descripcion: req.body.descripcion,
@@ -137,11 +164,8 @@ const productsController = {
       };
 
       let imagenFile = null;
-      if (req.file) {
-        imagenFile = req.file;
-      } else if (req.files && req.files.imagen) {
-        imagenFile = req.files.imagen;
-      }
+      if (req.file) imagenFile = req.file;
+      else if (req.files && req.files.imagen) imagenFile = req.files.imagen;
 
       const producto = await productsService.updateProducto(
         parseInt(id),
@@ -169,11 +193,9 @@ const productsController = {
     try {
       const { id } = req.params;
       const { cantidad, idbodega } = req.body;
-      
       if (!idbodega) {
         return res.status(400).json({ error: "Se requiere idbodega" });
       }
-      
       const producto = await productsService.updateStockProducto(
         parseInt(id),
         cantidad,
