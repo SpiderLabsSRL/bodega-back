@@ -1,6 +1,9 @@
 // src/services/salesService.js
 const { query, pool } = require("../../db");
 
+// ============================================
+// BÚSQUEDA DE PRODUCTOS
+// ============================================
 const searchProducts = async (searchQuery, withoutStock = true, idbodega = null) => {
   if (!searchQuery || searchQuery.trim() === "") {
     return [];
@@ -10,6 +13,35 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
     console.log("⚠️ No se proporcionó idbodega, no se pueden buscar productos");
     return [];
   }
+
+  // 🔑 1. Normalizar: minúsculas, reemplazar guiones/underscores por espacios
+  const normalized = searchQuery
+    .toLowerCase()
+    .replace(/[-_]/g, " ")
+    .trim();
+
+  // 🔑 2. Tokenizar: dividir por espacios
+  const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
+
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  // 🔑 3. Cada token debe aparecer (sin acentos) en nombre, descripcion o codigo_barras
+  const tokenConditions = tokens
+    .map((_, i) => {
+      const p = `$${i + 1}`;
+      return `(
+        LOWER(unaccent(p.nombre)) ILIKE ${p}
+        OR LOWER(unaccent(COALESCE(p.descripcion, ''))) ILIKE ${p}
+        OR LOWER(unaccent(COALESCE(p.codigo_barras, ''))) ILIKE ${p}
+      )`;
+    })
+    .join(" AND ");
+
+  // 🔑 4. Índices de parámetros
+  const fullQueryParamIndex = tokens.length + 1;
+  const idbodegaParamIndex = tokens.length + 2;
 
   let productsSql = `
     SELECT 
@@ -50,17 +82,20 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
         ), '[]'::json
       ) as productos_similares
     FROM productos p
-    INNER JOIN producto_bodega pb ON p.idproducto = pb.idproducto AND pb.idbodega = $2
+    INNER JOIN producto_bodega pb 
+      ON p.idproducto = pb.idproducto 
+      AND pb.idbodega = $${idbodegaParamIndex}
     WHERE p.estado = 0 
-      AND (
-        p.nombre ILIKE $1 
-        OR p.descripcion ILIKE $1 
-        OR p.codigo_barras ILIKE $1
-      )
       AND pb.idbodega IS NOT NULL
+      AND (${tokenConditions})
   `;
 
-  const params = [`%${searchQuery}%`, idbodega];
+  // 🔑 5. Parámetros: %token% por cada token, luego el query completo normalizado, luego idbodega
+  const params = [
+    ...tokens.map((t) => `%${t}%`),
+    `%${normalized}%`,
+    idbodega,
+  ];
 
   if (withoutStock) {
     productsSql += ` AND COALESCE(pb.stock, 0) > 0`;
@@ -68,31 +103,48 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
 
   productsSql += `
     GROUP BY p.idproducto, pb.stock, pb.idbodega
-    ORDER BY p.nombre
-    LIMIT 10;
+    ORDER BY 
+      -- 🔑 Ranking:
+      --   0: empieza con el query completo
+      --   1: contiene el query como palabra (con espacio antes)
+      --   2: contiene el query en cualquier parte
+      --   3: resto
+      CASE 
+        WHEN LOWER(unaccent(p.nombre)) LIKE $${fullQueryParamIndex} || '%' THEN 0
+        WHEN LOWER(unaccent(p.nombre)) LIKE '% ' || $${fullQueryParamIndex} || '%' THEN 1
+        WHEN LOWER(unaccent(p.nombre)) LIKE $${fullQueryParamIndex} THEN 2
+        ELSE 3
+      END,
+      -- 🔑 Desempate por similitud trigram (más parecidos primero)
+      similarity(LOWER(unaccent(p.nombre)), $${fullQueryParamIndex}) DESC,
+      -- 🔑 Desempate final alfabético
+      p.nombre
+    LIMIT 20;
   `;
 
   try {
     console.log("📝 SQL Query:", productsSql);
     console.log("📝 Params:", params);
     const productsResult = await query(productsSql, params);
-    
-    const productosFiltrados = productsResult.rows.map(producto => {
+
+    const productosFiltrados = productsResult.rows.map((producto) => {
       let ubicaciones = producto.ubicaciones || [];
-      
+
       if (Array.isArray(ubicaciones)) {
-        ubicaciones = ubicaciones.filter(u => u && u.idubicacion !== null);
+        ubicaciones = ubicaciones.filter((u) => u && u.idubicacion !== null);
         if (idbodega) {
-          ubicaciones = ubicaciones.filter(u => u.idbodega === parseInt(idbodega));
+          ubicaciones = ubicaciones.filter(
+            (u) => u.idbodega === parseInt(idbodega)
+          );
         }
       }
-      
+
       return {
         ...producto,
-        ubicaciones: ubicaciones
+        ubicaciones: ubicaciones,
       };
     });
-    
+
     return productosFiltrados;
   } catch (error) {
     console.error("Error in searchProducts SQL query:", error);
@@ -100,13 +152,37 @@ const searchProducts = async (searchQuery, withoutStock = true, idbodega = null)
   }
 };
 
+// ============================================
+// BÚSQUEDA DE CLIENTES
+// ============================================
 const searchClientes = async (searchQuery) => {
   console.log("searchClientes called with:", searchQuery);
-  
+
   if (!searchQuery || searchQuery.trim().length < 2) {
     console.log("Query too short, returning empty");
     return [];
   }
+
+  // Normalizar y tokenizar
+  const normalized = searchQuery.toLowerCase().replace(/[-_]/g, " ").trim();
+  const tokens = normalized.split(/\s+/).filter((t) => t.length > 0);
+
+  if (tokens.length === 0) {
+    return [];
+  }
+
+  // Cada token debe aparecer en nombres, apellidos, carnet o celular
+  const tokenConditions = tokens
+    .map((_, i) => {
+      const p = `$${i + 1}`;
+      return `(
+        LOWER(unaccent(nombres)) ILIKE ${p}
+        OR LOWER(unaccent(apellidos)) ILIKE ${p}
+        OR LOWER(unaccent(COALESCE(carnet, ''))) ILIKE ${p}
+        OR LOWER(unaccent(COALESCE(celular, ''))) ILIKE ${p}
+      )`;
+    })
+    .join(" AND ");
 
   const sql = `
     SELECT 
@@ -119,32 +195,29 @@ const searchClientes = async (searchQuery) => {
       estado
     FROM clientes
     WHERE estado = 0
-      AND (
-        nombres ILIKE $1 OR 
-        apellidos ILIKE $1 OR 
-        carnet ILIKE $1 OR 
-        celular ILIKE $1
-      )
-    ORDER BY nombres
+      AND (${tokenConditions})
+    ORDER BY nombres, apellidos
     LIMIT 10;
   `;
 
+  const params = tokens.map((t) => `%${t}%`);
+
   try {
     console.log("Executing SQL:", sql);
-    const result = await query(sql, [`%${searchQuery}%`]);
+    console.log("Params:", params);
+    const result = await query(sql, params);
     console.log("SQL result rows:", result.rows.length);
-    
-    const mapped = result.rows.map(row => ({
+
+    const mapped = result.rows.map((row) => ({
       id: row.idcliente,
       nombres: row.nombres,
       apellidos: row.apellidos,
       carnet: row.carnet,
       celular: row.celular,
       nota: row.nota || "",
-      estado: row.estado === 0
+      estado: row.estado === 0,
     }));
-    
-    console.log("Mapped clients:", mapped);
+
     return mapped;
   } catch (error) {
     console.error("Error in searchClientes SQL query:", error);
@@ -152,46 +225,45 @@ const searchClientes = async (searchQuery) => {
   }
 };
 
-// Función para verificar si la caja está abierta
+// ============================================
+// CAJA: verificar / obtener / crear / movimientos
+// ============================================
 const verificarCajaAbierta = async (client, idcaja) => {
   const result = await client.query(
     `SELECT estado_caja FROM caja WHERE idcaja = $1`,
     [idcaja]
   );
-  
+
   if (result.rows.length === 0) {
     throw new Error("No se encontró la caja");
   }
-  
-  if (result.rows[0].estado_caja !== 'abierta') {
+
+  if (result.rows[0].estado_caja !== "abierta") {
     throw new Error("La caja está cerrada. No se pueden realizar ventas.");
   }
-  
+
   return result.rows[0].estado_caja;
 };
 
-// Función para obtener estado de la caja
 const getEstadoCaja = async (idbodega, tipo) => {
   try {
     const result = await query(
       `SELECT estado_caja FROM caja WHERE idbodega = $1 AND tipo = $2`,
       [idbodega, tipo]
     );
-    
+
     if (result.rows.length === 0) {
-      return 'cerrada';
+      return "cerrada";
     }
-    
+
     return result.rows[0].estado_caja;
   } catch (error) {
     console.error("Error getting caja estado:", error);
-    return 'cerrada';
+    return "cerrada";
   }
 };
 
-// Función para obtener o crear caja según tipo
 const getOrCreateCaja = async (client, idbodega, tipo) => {
-  // Buscar caja existente
   const cajaResult = await client.query(
     `SELECT idcaja, total, estado_caja FROM caja 
      WHERE idbodega = $1 AND tipo = $2`,
@@ -202,8 +274,7 @@ const getOrCreateCaja = async (client, idbodega, tipo) => {
     return cajaResult.rows[0];
   }
 
-  // Crear nueva caja si no existe
-  const nombre = tipo === 'Efectivo' ? 'Caja Efectivo' : 'Caja QR';
+  const nombre = tipo === "Efectivo" ? "Caja Efectivo" : "Caja QR";
   const newCaja = await client.query(
     `INSERT INTO caja (nombre, tipo, estado_caja, total, idbodega) 
      VALUES ($1, $2, 'cerrada', 0, $3) 
@@ -214,33 +285,46 @@ const getOrCreateCaja = async (client, idbodega, tipo) => {
   return newCaja.rows[0];
 };
 
-// Función para registrar movimiento en caja
-const registrarMovimientoCaja = async (client, idcaja, idusuario, monto, tipo, descripcion, idventa = null) => {
-  // Obtener monto actual de la caja
+const registrarMovimientoCaja = async (
+  client,
+  idcaja,
+  idusuario,
+  monto,
+  tipo,
+  descripcion,
+  idventa = null
+) => {
   const cajaActual = await client.query(
     `SELECT total FROM caja WHERE idcaja = $1`,
     [idcaja]
   );
 
-  const montoAnterior = cajaActual.rows.length > 0 ? parseFloat(cajaActual.rows[0].total) : 0;
+  const montoAnterior =
+    cajaActual.rows.length > 0 ? parseFloat(cajaActual.rows[0].total) : 0;
   let montoActual = montoAnterior;
 
-  // Calcular nuevo monto según tipo de movimiento
-  if (tipo === 'ingreso' || tipo === 'apertura') {
+  if (tipo === "ingreso" || tipo === "apertura") {
     montoActual = montoAnterior + monto;
-  } else if (tipo === 'egreso' || tipo === 'cierre') {
+  } else if (tipo === "egreso" || tipo === "cierre") {
     montoActual = montoAnterior - monto;
   }
 
-  // Insertar movimiento
   await client.query(
     `INSERT INTO movimiento_caja 
      (idcaja, idusuario, monto, tipo, descripcion, monto_anterior, monto_actual, idventa) 
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [idcaja, idusuario, monto, tipo, descripcion, montoAnterior, montoActual, idventa]
+    [
+      idcaja,
+      idusuario,
+      monto,
+      tipo,
+      descripcion,
+      montoAnterior,
+      montoActual,
+      idventa,
+    ]
   );
 
-  // Actualizar total de la caja
   await client.query(
     `UPDATE caja SET total = $1 WHERE idcaja = $2`,
     [montoActual, idcaja]
@@ -249,9 +333,12 @@ const registrarMovimientoCaja = async (client, idcaja, idusuario, monto, tipo, d
   return { montoAnterior, montoActual };
 };
 
+// ============================================
+// PROCESAR VENTA
+// ============================================
 const processSale = async (saleData, userId, idbodega = null) => {
   console.log("🏪 processSale called with:", { userId, idbodega, saleData });
-  
+
   const client = await pool.connect();
 
   try {
@@ -260,7 +347,7 @@ const processSale = async (saleData, userId, idbodega = null) => {
     // Verificar usuario
     const userCheck = await client.query(
       "SELECT idusuario, idbodega FROM usuarios WHERE idusuario = $1 AND estado = 0",
-      [userId],
+      [userId]
     );
 
     if (userCheck.rows.length === 0) {
@@ -270,7 +357,7 @@ const processSale = async (saleData, userId, idbodega = null) => {
     if (!idbodega) {
       idbodega = userCheck.rows[0].idbodega;
       console.log("📦 Usando bodega del usuario:", idbodega);
-      
+
       if (!idbodega) {
         throw new Error("El usuario no tiene una bodega asignada");
       }
@@ -287,12 +374,12 @@ const processSale = async (saleData, userId, idbodega = null) => {
         WHERE p.idproducto = $1 AND p.estado = 0
       `;
       const params = [item.idproducto, idbodega];
-      
+
       const stockCheck = await client.query(stockCheckSql, params);
 
       if (stockCheck.rows.length === 0) {
         throw new Error(
-          `El producto ${item.idproducto} no existe o está inactivo`,
+          `El producto ${item.idproducto} no existe o está inactivo`
         );
       }
 
@@ -300,22 +387,18 @@ const processSale = async (saleData, userId, idbodega = null) => {
       if (stockDisponible < item.cantidad) {
         const productName = stockCheck.rows[0].nombre || "Producto";
         throw new Error(
-          `Stock insuficiente para ${productName}. Stock disponible: ${stockDisponible}`,
+          `Stock insuficiente para ${productName}. Stock disponible: ${stockDisponible}`
         );
       }
     }
 
-    // ============================================
-    // VERIFICAR QUE LA CAJA ESTÉ ABIERTA
-    // ============================================
-    const metodoPago = saleData.metodo_pago || 'Efectivo';
+    // Verificar caja según método de pago
+    const metodoPago = saleData.metodo_pago || "Efectivo";
     console.log(`💰 Verificando caja ${metodoPago} para bodega ${idbodega}`);
-    
-    // Obtener la caja correspondiente
+
     const caja = await getOrCreateCaja(client, idbodega, metodoPago);
     console.log(`📦 Caja ${metodoPago} encontrada:`, caja);
-    
-    // Verificar que la caja esté abierta
+
     await verificarCajaAbierta(client, caja.idcaja);
     console.log(`✅ Caja ${metodoPago} está abierta`);
 
@@ -328,13 +411,13 @@ const processSale = async (saleData, userId, idbodega = null) => {
         userId,
         idbodega,
         saleData.idcliente || null,
-        saleData.descripcion || '',
+        saleData.descripcion || "",
         saleData.sub_total || 0,
         saleData.descuento || 0,
         saleData.total || 0,
-        saleData.metodo_pago || 'Efectivo',
-        saleData.descripcion_descuento || '',
-      ],
+        saleData.metodo_pago || "Efectivo",
+        saleData.descripcion_descuento || "",
+      ]
     );
 
     const saleId = saleResult.rows[0].idventa;
@@ -352,7 +435,7 @@ const processSale = async (saleData, userId, idbodega = null) => {
           item.cantidad,
           item.precio_unitario,
           item.subtotal_linea,
-        ],
+        ]
       );
 
       const updateStockResult = await client.query(
@@ -360,36 +443,37 @@ const processSale = async (saleData, userId, idbodega = null) => {
          SET stock = stock - $1 
          WHERE idproducto = $2 AND idbodega = $3
          RETURNING stock`,
-        [item.cantidad, item.idproducto, idbodega],
+        [item.cantidad, item.idproducto, idbodega]
       );
 
       if (updateStockResult.rows.length === 0) {
         await client.query(
           `INSERT INTO producto_bodega (idproducto, idbodega, stock, stock_minimo)
            VALUES ($1, $2, -$3, 0)`,
-          [item.idproducto, idbodega, item.cantidad],
+          [item.idproducto, idbodega, item.cantidad]
         );
       }
 
-      console.log(`📦 Stock actualizado para producto ${item.idproducto} en bodega ${idbodega}`);
+      console.log(
+        `📦 Stock actualizado para producto ${item.idproducto} en bodega ${idbodega}`
+      );
     }
 
-    // ============================================
-    // REGISTRO EN CAJA SEGÚN MÉTODO DE PAGO
-    // ============================================
+    // Registrar movimiento en caja
     const totalVenta = parseFloat(saleData.total) || 0;
+    console.log(
+      `💰 Registrando venta en caja ${metodoPago} por Bs ${totalVenta}`
+    );
 
-    console.log(`💰 Registrando venta en caja ${metodoPago} por Bs ${totalVenta}`);
+    const descripcionMovimiento =
+      saleData.descripcion || "Venta de productos";
 
-    // Registrar ingreso en caja con descripción solo de los productos
-    const descripcionMovimiento = saleData.descripcion || 'Venta de productos';
-    
     await registrarMovimientoCaja(
       client,
       caja.idcaja,
       userId,
       totalVenta,
-      'ingreso',
+      "ingreso",
       descripcionMovimiento,
       saleId
     );
@@ -414,4 +498,4 @@ module.exports = {
   searchClientes,
   processSale,
   getEstadoCaja,
-};  
+};

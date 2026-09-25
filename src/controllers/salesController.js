@@ -5,15 +5,29 @@ const searchProducts = async (req, res) => {
   try {
     const { q, withoutStock, bodega } = req.query;
 
+    // 👈 CAMBIO: por defecto false (no filtrar por stock) para que aparezcan
+    //    también los productos con stock 0 si el frontend no lo especifica.
     const withoutStockParam =
-      withoutStock !== undefined ? withoutStock === "true" : true;
+      withoutStock !== undefined ? withoutStock === "true" : false;
+
+    console.log("🔍 searchProducts recibido:", {
+      q,
+      withoutStockParam,
+      bodega,
+    });
 
     if (!bodega) {
       console.log("⚠️ No se proporcionó bodega para búsqueda de productos");
       return res.json([]);
     }
 
-    const products = await salesService.searchProducts(q, withoutStockParam, bodega);
+    const products = await salesService.searchProducts(
+      q,
+      withoutStockParam,
+      bodega
+    );
+
+    console.log(`✅ ${products.length} productos encontrados para "${q}"`);
     res.json(products);
   } catch (error) {
     console.error("Error in searchProducts:", error);
@@ -24,9 +38,9 @@ const searchProducts = async (req, res) => {
 const searchClientes = async (req, res) => {
   try {
     const { q } = req.query;
-    
+
     console.log("Buscando clientes con termino:", q);
-    
+
     if (!q || q.trim().length < 2) {
       console.log("Termino de búsqueda demasiado corto");
       return res.json([]);
@@ -48,7 +62,7 @@ const processSale = async (req, res) => {
 
     const userId = saleData.userId || req.headers["user-id"];
     let idbodega = saleData.idbodega || req.headers["bodega-id"];
-    
+
     console.log("👤 userId:", userId);
     console.log("🏢 idbodega:", idbodega);
 
@@ -60,7 +74,6 @@ const processSale = async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error("Error in processSale:", error);
-    // Enviar mensaje de error específico para caja cerrada
     if (error.message.includes("caja está cerrada")) {
       res.status(400).json({ error: error.message });
     } else {
@@ -69,15 +82,14 @@ const processSale = async (req, res) => {
   }
 };
 
-// Nuevo endpoint para obtener el estado de la caja
 const getEstadoCaja = async (req, res) => {
   try {
     const { idbodega, tipo } = req.query;
-    
+
     if (!idbodega || !tipo) {
       return res.status(400).json({ error: "Se requiere idbodega y tipo" });
     }
-    
+
     const estado = await salesService.getEstadoCaja(parseInt(idbodega), tipo);
     res.json({ estado });
   } catch (error) {
